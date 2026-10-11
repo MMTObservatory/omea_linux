@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omea"
+version = "0.1.0"
+description = "Linux replacement for Alcor System's Skywatch software for the MMTO OMEA 8C all-sky camera"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "astropy",
+    "matplotlib",
+    "pillow",
+    "scipy",
+    "pyserial",
+    "skycam_utils",     # not on PyPI: install from github.com/tepickering/skycam-utils first
+]
+
+[project.optional-dependencies]
+redis = ["redis"]
+test = ["pytest"]
+
+[project.scripts]
+omea = "omea.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["omea*"]
+
+[tool.setuptools.package-data]
+omea = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

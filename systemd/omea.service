@@ -1,0 +1,15 @@
+[Unit]
+Description=OMEA all-sky camera (replaces Alcor Skywatch)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/omea_linux
+ExecStart=%h/conda/envs/skycam/bin/omea -c %h/omea_linux/config.toml run
+Restart=on-failure
+RestartSec=30
+# the cooler is switched off on a clean stop; give a 20 s exposure time to end
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMEA All-Sky</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-0: #f3f2ee; --surface-1: #fcfcfb; --border: #dcdbd5;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --grid: #e6e5e0; --accent: #2a78d6;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --good: #008300; --warn: #c98500; --bad: #e34948;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-0: #111110; --surface-1: #1a1a19; --border: #33332f;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --grid: #2a2a27; --accent: #3987e5;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --good: #2ea043; --warn: #c98500; --bad: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #111110; --surface-1: #1a1a19; --border: #33332f;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+  --grid: #2a2a27; --accent: #3987e5;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+  --good: #2ea043; --warn: #c98500; --bad: #e66767;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+       font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 10px 16px;
+         background: var(--surface-1); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav a { padding: 5px 12px; border-radius: 6px; color: var(--text-secondary); text-decoration: none; }
+nav a.active { background: var(--surface-0); color: var(--text-primary); font-weight: 600; }
+#state { margin-left: auto; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+main { padding: 16px; max-width: 1500px; margin: 0 auto; }
+section { display: none; } section.active { display: block; }
+.sky { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; }
+@media (max-width: 900px) { .sky { grid-template-columns: 1fr; } }
+img.frame { width: 100%; height: auto; display: block; border-radius: 6px; background: #000; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+           color: var(--text-muted); margin: 0 0 8px; font-weight: 600; }
+table.kv { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+table.kv td { padding: 3px 0; border-bottom: 1px solid var(--grid); }
+table.kv td:last-child { text-align: right; color: var(--text-primary); }
+table.kv td:first-child { color: var(--text-secondary); }
+.side { display: flex; flex-direction: column; gap: 12px; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 16px; }
+@media (max-width: 520px) { .charts { grid-template-columns: 1fr; } }
+.chart { position: relative; }
+.chart svg { width: 100%; height: 220px; display: block; overflow: visible; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
+       border-radius: 6px; padding: 6px 8px; font-size: 12px; display: none; white-space: nowrap;
+       box-shadow: 0 2px 8px rgba(0,0,0,.2); font-variant-numeric: tabular-nums; z-index: 2; }
+.tip b { font-weight: 600; } .tip i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.empty { color: var(--text-muted); padding: 40px 0; text-align: center; }
+pre#log { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+          font-size: 12px; overflow-x: auto; max-height: 75vh; white-space: pre-wrap; }
+.scroll { overflow-x: auto; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; border: 1px solid currentColor; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OMEA all-sky camera</h1>
+  <nav>
+    <a href="#sky" data-tab="sky">Sky</a>
+    <a href="#panorama" data-tab="panorama">Panorama</a>
+    <a href="#keogram" data-tab="keogram">Keogram</a>
+    <a href="#plots" data-tab="plots">Plots</a>
+    <a href="#log" data-tab="log">Log</a>
+  </nav>
+  <span id="state">connecting…</span>
+</header>
+<main>
+  <section id="sky">
+    <div class="sky">
+      <img class="frame" id="img-allsky" alt="Latest all-sky image">
+      <div class="side">
+        <div class="card"><h2>Camera</h2><table class="kv" id="kv-camera"></table></div>
+        <div class="card"><h2>Sky</h2><table class="kv" id="kv-sky"></table></div>
+        <div class="card"><h2>Enclosure</h2><table class="kv" id="kv-board"></table></div>
+      </div>
+    </div>
+  </section>
+  <section id="panorama"><div class="scroll"><img class="frame" id="img-unwrap" alt="Unwrapped panorama" style="min-width:1200px"></div></section>
+  <section id="keogram"><div class="scroll"><img class="frame" id="img-keogram" alt="Keogram since local noon" style="min-width:1200px"></div>
+    <p style="color:var(--text-muted)">Zenith column of every frame on a noon-to-noon axis; north at the top.</p></section>
+  <section id="plots"><div class="charts" id="charts"></div></section>
+  <section id="log"><pre id="log-text"></pre></section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const tabs = [...document.querySelectorAll("nav a")];
+function showTab() {
+  const name = (location.hash || "#sky").slice(1).split("/")[0];
+  tabs.forEach(a => a.classList.toggle("active", a.dataset.tab === name));
+  document.querySelectorAll("section").forEach(s => s.classList.toggle("active", s.id === name));
+  refresh();
+}
+window.addEventListener("hashchange", showTab);
+
+const fmt = (v, d = 1, unit = "") => (v === null || v === undefined || Number.isNaN(v)) ? "–" : `${Number(v).toFixed(d)}${unit}`;
+function exposureText(e) { return e >= 1 ? `${e.toFixed(1)} s` : `${(e * 1000).toFixed(2)} ms`; }
+function kv(el, rows) { el.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join(""); }
+function age(t) { if (!t) return "–"; const s = Date.now() / 1000 - t; return s < 120 ? `${s.toFixed(0)} s ago` : `${(s / 60).toFixed(0)} min ago`; }
+
+async function getJSON(url) { const r = await fetch(url, { cache: "no-store" }); return r.json(); }
+
+async function refreshStatus() {
+  const s = await getJSON("/api/status");
+  const stale = s.last_frame_time && (Date.now() / 1000 - s.last_frame_time > 180);
+  $("#state").innerHTML = `${s.mode || "–"} · ${s.state} · ${s.frames} frames` +
+    (stale ? ` · <span class="badge" style="color:var(--bad)">no frame for ${age(s.last_frame_time)}</span>` : "");
+  kv($("#kv-camera"), [
+    ["Camera", s.camera || "–"], ["Exposure", exposureText(s.exposure || 0)], ["Gain", s.gain],
+    ["Iris", s.fratio ? `f/${s.fratio.toFixed(1)}` : "–"], ["Focus", s.focus],
+    ["Sensor", `${fmt(s.ccd_temp, 1, " °C")} (set ${fmt(s.cooler_target, 1, " °C")})`],
+    ["Cooler power", fmt(s.cooler_power, 0, " %")], ["Last frame", age(s.last_frame_time)],
+    ["Dropped", s.dropped],
+  ]);
+  const sc = s.science || {};
+  kv($("#kv-sky"), [
+    ["Sun", fmt(s.sun_alt, 1, "°")], ["Moon", fmt(s.moon_alt, 1, "°")],
+    ["Sky level", fmt(s.sky_level, 0, " ADU")],
+    ["Zenith", fmt(sc.allsky_mv_zenith, 2, " mag/″²")], ["Darkest cone", fmt(sc.allsky_mv_best, 2, " mag/″²")],
+    ["Extinction (G)", fmt(sc.allsky_ext_g, 2, " mag")], ["Stars detected", sc.allsky_ndetected ?? "–"],
+  ]);
+  const b = s.board || {};
+  kv($("#kv-board"), [
+    ["Outside", `${fmt(b.temp_ext, 1, " °C")} · ${fmt(b.rh_ext, 0, " %")}`],
+    ["Dew point", fmt(b.dew_point, 1, " °C")],
+    ["Inside", `${fmt(b.temp_int, 1, " °C")} · ${fmt(b.rh_int, 0, " %")}`],
+    ["Heater ring", fmt(b.temp_hot, 1, " °C")],
+    ["Dome heater", b.heater_on === undefined ? "–" : (b.heater_on ? "ON" : "off") + (b.auto_heat ? " (auto)" : "")],
+  ]);
+}
+
+function refreshImage(id, name) {
+  const img = $(id); const url = `/image/${name}.jpg?t=${Date.now()}`;
+  const probe = new Image(); probe.onload = () => { img.src = url; }; probe.src = url;
+}
+
+// ---- charts: one measure per chart, crosshair + tooltip on hover ----------
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function niceTicks(lo, hi, n) {
+  const span = hi - lo || 1, step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= n) || step0;
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+function lineChart(host, { title, unit, series, invert = false, log = false, digits = 2 }) {
+  const card = document.createElement("div"); card.className = "card chart";
+  card.innerHTML = `<h2>${title}</h2>`; host.appendChild(card);
+  const live = series.filter(s => s.points.length);
+  if (!live.length) { card.insertAdjacentHTML("beforeend", `<div class="empty">No data yet</div>`); return; }
+  if (series.length > 1) card.insertAdjacentHTML("beforeend",
+    `<div class="legend">${series.map(s => `<span><i style="background:${css(s.color)}"></i>${s.name}</span>`).join("")}</div>`);
+  const W = 640, H = 220, m = { l: 52, r: 12, t: 8, b: 26 };
+  const ts = live.flatMap(s => s.points.map(p => p[0])), vs = live.flatMap(s => s.points.map(p => p[1]));
+  const t0 = Math.min(...ts), t1 = Math.max(...ts) || t0 + 1;
+  const tf = log ? (v) => Math.log10(v) : (v) => v;
+  let lo = Math.min(...vs.map(tf)), hi = Math.max(...vs.map(tf)); const pad = (hi - lo) * 0.06 || 0.5; lo -= pad; hi += pad;
+  const x = (t) => m.l + (t - t0) / Math.max(t1 - t0, 1) * (W - m.l - m.r);
+  const y = (v) => { const f = (tf(v) - lo) / (hi - lo); return invert ? m.t + f * (H - m.t - m.b) : H - m.b - f * (H - m.t - m.b); };
+  let g = "";
+  const yt = log ? niceTicks(lo, hi, 4).map(v => 10 ** v) : niceTicks(lo, hi, 5);
+  for (const v of yt) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${css("--grid")}"/>` +
+    `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="${css("--text-muted")}">${log ? (v >= 1 ? v.toFixed(0) : v.toPrecision(1)) : +v.toFixed(3)}</text>`;
+  const hour = 3600, stepH = (t1 - t0) > 12 * hour ? 3 : (t1 - t0) > 4 * hour ? 1 : 0.5;
+  for (let t = Math.ceil(t0 / (stepH * hour)) * stepH * hour; t <= t1; t += stepH * hour) {
+    const d = new Date(t * 1000), lab = `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+    g += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="${css("--text-muted")}">${lab}</text>`;
+  }
+  g += `<text x="${W - m.r}" y="${H - 6}" text-anchor="end" font-size="11" fill="${css("--text-muted")}">UT</text>`;
+  g += `<text x="4" y="${m.t + 8}" font-size="11" fill="${css("--text-muted")}">${unit}</text>`;
+  for (const s of live) {
+    let d = "", prev = null;
+    for (const [t, v] of s.points) { d += (prev !== null && t - prev > 900 ? "M" : (d ? "L" : "M")) + `${x(t).toFixed(1)},${y(v).toFixed(1)}`; prev = t; }
+    g += `<path d="${d}" fill="none" stroke="${css(s.color)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+  g += `<line id="xh" y1="${m.t}" y2="${H - m.b}" stroke="${css("--text-muted")}" stroke-dasharray="3 3" visibility="hidden"/>`;
+  card.insertAdjacentHTML("beforeend", `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${title}">${g}</svg><div class="tip"></div>`);
+  const svg = card.querySelector("svg"), tip = card.querySelector(".tip"), xh = svg.querySelector("#xh");
+  svg.addEventListener("mousemove", (ev) => {
+    const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width * W;
+    const t = t0 + (px - m.l) / (W - m.l - m.r) * (t1 - t0);
+    if (px < m.l || px > W - m.r) { tip.style.display = "none"; xh.setAttribute("visibility", "hidden"); return; }
+    const rows = live.map(s => { let best = s.points[0]; for (const p of s.points) if (Math.abs(p[0] - t) < Math.abs(best[0] - t)) best = p; return [s, best]; });
+    const d = new Date(rows[0][1][0] * 1000);
+    tip.innerHTML = `<b>${d.toISOString().slice(11, 19)} UT</b><br>` +
+      rows.map(([s, p]) => `<i style="background:${css(s.color)}"></i>${s.name}: ${p[1].toFixed(digits)} ${unit}`).join("<br>");
+    tip.style.display = "block";
+    const left = ev.clientX - card.getBoundingClientRect().left;
+    tip.style.left = `${Math.min(left + 12, card.clientWidth - tip.offsetWidth - 4)}px`; tip.style.top = `40px`;
+    xh.setAttribute("x1", x(rows[0][1][0])); xh.setAttribute("x2", x(rows[0][1][0])); xh.setAttribute("visibility", "visible");
+  });
+  svg.addEventListener("mouseleave", () => { tip.style.display = "none"; xh.setAttribute("visibility", "hidden"); });
+}
+
+async function refreshPlots() {
+  const h = await getJSON("/api/history");
+  const host = $("#charts"); host.innerHTML = "";
+  const pts = (rows, key, tkey = "time") => rows
+    .map(r => [typeof r[tkey] === "number" ? r[tkey] : Date.parse(r[tkey]) / 1000, r[key]])
+    .filter(p => p[1] !== null && p[1] !== undefined && Number.isFinite(+p[1])).map(p => [p[0], +p[1]]);
+  const F = h.frames, Wt = h.weather;
+  lineChart(host, { title: "Sky brightness", unit: "mag/″²", invert: true, series: [
+    { name: "Zenith", color: "--series-1", points: pts(F, "allsky_mv_zenith") },
+    { name: "Darkest cone", color: "--series-2", points: pts(F, "allsky_mv_best") },
+    { name: "Tucson dome", color: "--series-3", points: pts(F, "allsky_mv_tucson") },
+    { name: "Nogales dome", color: "--series-4", points: pts(F, "allsky_mv_nogales") } ] });
+  lineChart(host, { title: "Cloud extinction (G, median)", unit: "mag", series: [
+    { name: "Extinction", color: "--series-1", points: pts(F, "ext_g_all") } ] });
+  lineChart(host, { title: "Exposure", unit: "s", log: true, digits: 4, series: [
+    { name: "Exposure", color: "--series-1", points: pts(F, "exposure") } ] });
+  lineChart(host, { title: "Temperature", unit: "°C", digits: 1, series: [
+    { name: "Outside", color: "--series-1", points: pts(Wt, "temp_ext") },
+    { name: "Dew point", color: "--series-2", points: pts(Wt, "dew_point") },
+    { name: "Inside", color: "--series-3", points: pts(Wt, "temp_int") },
+    { name: "Sensor", color: "--series-4", points: pts(Wt, "ccd_temp") } ] });
+  lineChart(host, { title: "Relative humidity", unit: "%", digits: 0, series: [
+    { name: "Outside", color: "--series-1", points: pts(Wt, "rh_ext") },
+    { name: "Inside", color: "--series-2", points: pts(Wt, "rh_int") } ] });
+}
+
+async function refresh() {
+  try {
+    await refreshStatus();
+    const tab = (location.hash || "#sky").slice(1);
+    if (tab === "sky") refreshImage("#img-allsky", "allsky");
+    if (tab === "panorama") refreshImage("#img-unwrap", "unwrap");
+    if (tab === "keogram") refreshImage("#img-keogram", "keogram");
+    if (tab === "plots") await refreshPlots();
+    if (tab === "log") $("#log-text").textContent = (await getJSON("/api/log")).slice().reverse().join("\n");
+  } catch (e) { $("#state").textContent = "server not responding"; }
+}
+showTab();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

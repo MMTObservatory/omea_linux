@@ -1,0 +1,18 @@
+# Vendor material downloaded from Alcor/ZWO; kept beside the code for reference only.
+/Skywatch
+/envi/
+/allsky-master/
+/*.7z
+/*.zip
+/*.tar.bz2
+/serial_weather.c
+/Links to full project.txt
+
+# local configuration and runtime output
+/config.toml
+/data/
+
+__pycache__/
+*.egg-info/
+.pytest_cache/
+CLAUDE.md

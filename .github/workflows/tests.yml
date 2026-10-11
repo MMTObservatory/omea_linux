@@ -1,0 +1,20 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      # skycam_utils is not on PyPI. The tests use the simulated camera and a
+      # fake serial port, so neither the ZWO camera nor the board is needed.
+      - run: pip install git+https://github.com/tepickering/skycam-utils.git
+      - run: pip install -e '.[test]'
+      - run: pytest -v

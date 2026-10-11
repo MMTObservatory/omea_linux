@@ -1,0 +1,69 @@
+# omea configuration. Every key is optional: the defaults (omea/config.py)
+# reproduce the Skywatch setup at the MMTO, so only list what you change.
+
+[site]
+# name = "MMTO"
+# latitude = 31.6867
+# longitude = -110.8842
+# elevation = 2600.0
+# timezone = "America/Phoenix"     # file names and day directories are local time
+
+[camera]
+driver = "zwo"
+# sdk_library = ""                 # default: lib/libASICamera2.so.* in this checkout
+# offset = 30
+# usb_bandwidth = 50
+# cooling = true
+# target_temperature = -5.0
+# cooling_sun_altitude = 0.0       # cool only while the Sun is below this
+# max_cooler_power = 95.0
+
+[image]
+# How RAW16 becomes the saved (3, 1411, 1422) cube. Do not change these unless
+# `omea check-geometry` says the frames do not line up with Skywatch's.
+# crop_x = 700
+# crop_y = 0
+# bayer = "RGGB"
+# mirror_x = true
+# mirror_y = false
+# adu_scale = 1.0
+
+[exposure]
+# max_exposure = 20.0
+# max_gain = 250
+# night_gain = 250                 # fixed at night: skycam_utils assumes it
+# day_target = 0.15                # median sky as a fraction of the range
+# night_target = 0.25
+# interval_day = 15.0              # seconds between exposure starts
+# interval_night = 35.0
+
+[mode]
+# night_sun_altitude = -6.0        # iris and gain switch here
+# night_fratio = 2.8
+# day_fratio = 16.0
+# focus_position = 1320
+
+[board]
+port = "/dev/ttyUSB0"              # the FTDI RS232 adapter (Windows COM3)
+# poll_interval = 30.0
+
+[output]
+data_dir = "/mnt/d/skycam"
+latest_dir = "/var/www/html/skycam"
+# tcs_logger.py reads this file; once Skywatch is retired it can live anywhere
+weather_csv = "/mnt/d/skycam/DataOut_Weather.csv"
+telescope_file = "/mnt/d/skycam/mmt_position.txt"
+
+[science]
+# enabled = true
+# workers = 2
+# sun_alt_max = -12.0
+# extinction_file = "/mnt/d/skycam/alcor_extinction_latest.fits"
+
+[redis]
+# enabled = true
+# host = "redis.mmto.arizona.edu"
+# password_env = "REDISPW"         # name of the environment variable, not the password
+
+[web]
+# port = 8081                      # cyclop uses 8080
