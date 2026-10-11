@@ -53,7 +53,8 @@ def make_handler(status):
                 with status.lock:
                     frames = list(status.history)
                     weather = list(status.weather)
-                self._json({"frames": frames, "weather": weather})
+                    extinction = list(status.extinction)
+                self._json({"frames": frames, "weather": weather, "extinction": extinction})
             elif path == "/api/log":
                 with status.lock:
                     self._json(list(status.log))

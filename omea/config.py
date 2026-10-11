@@ -114,7 +114,10 @@ class ScienceConfig:
     workers: int = 2
     sun_alt_max: float = -12.0
     photometry: bool = True
-    extinction_interval: float = 300.0     # s between cloud-extinction maps
+    # cloud-extinction map: a running average of the newest frames, rebuilt
+    # after every frame (interval 0) or at most every extinction_interval s
+    extinction_frames: int = 10
+    extinction_interval: float = 0.0
     extinction_file: str = "/mnt/d/skycam/alcor_extinction_latest.fits"
 
 

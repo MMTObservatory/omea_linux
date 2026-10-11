@@ -18,24 +18,48 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-_GEOMETRY = {}          # per-process: WCS key -> (cones, best cones, best targets)
+_GEOMETRY = {}          # per-process: WCS key -> _Geometry
 
 
-def _geometry(wcs, shape, time):
-    from skycam_utils.alcor import load_alcor_horizon_mask
-    from skycam_utils.alcor.skybright import (_alcor_best_cone_targets,
-                                              _alcor_cone_indices)
-    key = (tuple(np.round(wcs.wcs.crpix, 3)), tuple(np.round(wcs.wcs.crval, 5)))
-    if key not in _GEOMETRY:
+class _Geometry:
+    """Everything about the sampling cones that depends only on the WCS."""
+
+    def __init__(self, wcs, shape, time):
+        from skycam_utils.alcor import load_alcor_horizon_mask
+        from skycam_utils.alcor.skybright import (_alcor_best_cone_targets,
+                                                  _alcor_cone_indices)
         try:
             horizon, _ = load_alcor_horizon_mask(time)
         except Exception as err:                              # noqa: BLE001
             log.warning("no horizon mask (%s); cones are unmasked", err)
             horizon = None
-        cones = _alcor_cone_indices(wcs, shape, exclude=horizon)
-        targets = _alcor_best_cone_targets()
-        best = _alcor_cone_indices(wcs, shape, targets=targets, exclude=horizon)
-        _GEOMETRY[key] = (cones, best, targets)
+        self.cones = _alcor_cone_indices(wcs, shape, exclude=horizon)
+        self.best_targets = _alcor_best_cone_targets()
+        self.best = _alcor_cone_indices(wcs, shape, targets=self.best_targets,
+                                        exclude=horizon)
+        # unit vectors of every usable sky pixel, so a cone about an arbitrary
+        # direction (the MMT pointing) is one dot product per frame
+        ny, nx = shape
+        yy, xx = np.mgrid[0:ny, 0:nx]
+        az, alt = wcs.pixel_to_world_values(xx.astype(float), yy.astype(float))
+        valid = np.isfinite(alt)
+        if horizon is not None:
+            valid &= ~np.asarray(horizon, dtype=bool)
+        self.sky = np.flatnonzero(valid)
+        a, e = np.radians(az.ravel()[self.sky]), np.radians(alt.ravel()[self.sky])
+        self.vec = np.stack([np.cos(e) * np.sin(a), np.cos(e) * np.cos(a), np.sin(e)])
+
+    def cone(self, az, alt, radius):
+        """Flat indices of usable sky pixels within ``radius`` deg of (az, alt)."""
+        a, e = np.radians(az), np.radians(alt)
+        t = np.array([np.cos(e) * np.sin(a), np.cos(e) * np.cos(a), np.sin(e)])
+        return self.sky[t @ self.vec >= np.cos(np.radians(radius))]
+
+
+def _geometry(wcs, shape, time):
+    key = (tuple(np.round(wcs.wcs.crpix, 3)), tuple(np.round(wcs.wcs.crval, 5)))
+    if key not in _GEOMETRY:
+        _GEOMETRY[key] = _Geometry(wcs, shape, time)
     return _GEOMETRY[key]
 
 
@@ -64,14 +88,16 @@ def _extinction_summary(phot):
     return out
 
 
-def process_frame(path, photometry=True, sun_alt_max=-12.0):
+def process_frame(path, photometry=True, sun_alt_max=-12.0, target=None):
     """
     Measure one saved frame. Returns a dict of ``allsky_mv_*`` surface
-    brightnesses (V mag/arcsec^2), the darkest cone's position, and photometry
-    counts with the median extinction. Raises on a frame it cannot read.
+    brightnesses (V mag/arcsec^2) -- the fixed cones, the darkest cone and its
+    position, and ``allsky_mv_target`` in the same 5 deg cone about ``target``
+    (the MMT's (az, alt) at mid-exposure; NaN without one) -- plus photometry
+    counts and single-frame extinction. Raises on a frame it cannot read.
     """
     from skycam_utils.alcor import alcor_star_photometry, load_alcor_fits
-    from skycam_utils.alcor.config import ALCOR_SB_TARGETS
+    from skycam_utils.alcor.config import ALCOR_SB_APERTURE_RADIUS, ALCOR_SB_TARGETS
     from skycam_utils.alcor.skybright import _alcor_sky_brightness_map, _cone_median
     from skycam_utils.alcor.timeutils import _alcor_frame_time, _read_frame_exposure
 
@@ -79,16 +105,21 @@ def process_frame(path, photometry=True, sun_alt_max=-12.0):
     cube, wcs, mask = load_alcor_fits(path)              # bad pixels repaired
     time = _alcor_frame_time(path)
     exposure = _read_frame_exposure(path)
-    cones, best_cones, best_targets = _geometry(wcs, cube.shape[1:], time)
+    geom = _geometry(wcs, cube.shape[1:], time)
 
     mu, _ = _alcor_sky_brightness_map(cube, wcs, time, exposure)
-    result = {name: _cone_median(mu, cones[name]) for name in ALCOR_SB_TARGETS}
+    result = {name: _cone_median(mu, geom.cones[name]) for name in ALCOR_SB_TARGETS}
     best = best_az = best_alt = float("nan")
-    for name, idx in best_cones.items():
+    for name, idx in geom.best.items():
         value = _cone_median(mu, idx)
         if np.isfinite(value) and (not np.isfinite(best) or value > best):
-            best, (best_az, best_alt) = value, best_targets[name]
+            best, (best_az, best_alt) = value, geom.best_targets[name]
     result.update(allsky_mv_best=best, best_az=best_az, best_alt=best_alt)
+    result["allsky_mv_target"] = float("nan")
+    if target is not None:
+        result["allsky_mv_target"] = _cone_median(
+            mu, geom.cone(target[0], target[1], ALCOR_SB_APERTURE_RADIUS))
+        result["target_az"], result["target_alt"] = target
 
     if photometry:
         phot, csv = alcor_star_photometry(path, frame=(cube, wcs, mask),
@@ -98,14 +129,56 @@ def process_frame(path, photometry=True, sun_alt_max=-12.0):
     return result
 
 
+def censored_median(measured, nlost):
+    """
+    Median extinction when ``nlost`` stars were not detected at all.
+
+    A lost star's extinction is only a lower limit, but it is certainly larger
+    than that of any star still measured near it, so all lost stars rank above
+    every measured value. If the median lands among them (over half the stars
+    are lost), the true median is unknown but at least the largest measured
+    value, which is returned as a floor. NaN when nothing was measured.
+    """
+    values = np.sort(np.asarray(measured, dtype=float))
+    values = values[np.isfinite(values)]
+    n = len(values) + int(nlost)
+    if not len(values):
+        return float("nan")
+    upper = n // 2                       # index of the upper middle element
+    lower = (n - 1) // 2
+    if upper >= len(values):             # the median is a lost star: floor
+        return float(values[-1])
+    return float((values[lower] + values[upper]) / 2)
+
+
 def extinction_map(day_dir, output_file, nframes=10):
-    """Cloud-extinction map from the newest ``nframes`` photometry CSVs of a night."""
+    """
+    Cloud-extinction map from the newest ``nframes`` photometry CSVs of a night:
+    a running average, since a single frame's star magnitudes scatter by ~0.3
+    mag (undersampled PSF x intra-pixel sensitivity x Bayer matrix).
+
+    Returns None until there are ``nframes`` frames, else a dict with the map
+    ``path``, its mid-time ``tmid`` (ISO UT), ``median`` -- the
+    :func:`censored_median` of the map's stars, counting the undetected ones
+    rather than averaging only over the clear holes the map can still see --
+    and ``lost_fraction``, the share of those stars that were not detected.
+    """
+    from astropy.io import fits
     from skycam_utils.alcor import alcor_extinction_fits
     csvs = sorted(Path(day_dir).glob("*_phot.csv"))[-nframes:]
     if len(csvs) < nframes:
         return None
-    tmp = Path(output_file).with_name(f".{Path(output_file).name}.tmp.fits")
+    output_file = Path(output_file)
+    tmp = output_file.with_name(f".{output_file.name}.tmp.fits")
     alcor_extinction_fits(csvs, output_file=tmp, latest=nframes, nframes=nframes,
                           overwrite=True)
+    with fits.open(tmp) as hdul:
+        tmid = hdul[0].header.get("TMID", "")
+        stars = hdul["STARS"].data
+        detected = np.asarray(stars["detected"], dtype=bool)
+        ext = np.asarray(stars["ext"], dtype=float)
     tmp.replace(output_file)
-    return Path(output_file)
+    nlost = int((~detected).sum())
+    return {"path": str(output_file), "tmid": tmid,
+            "median": censored_median(ext[detected], nlost),
+            "lost_fraction": nlost / len(detected) if len(detected) else float("nan")}

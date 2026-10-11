@@ -30,7 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from . import board as board_mod
-from . import outputs, render, science
+from . import outputs, pointing, render, science
 from .camera import AbortedError, CameraError, open_camera
 from .clock import Clock
 from .ephem import Site
@@ -40,10 +40,17 @@ from .imaging import raw_to_cube
 
 log = logging.getLogger(__name__)
 
+# the redis keys agreed with the MMTO software group (June 2026); all floats,
+# "nan" when there is no measurement
+SCIENCE_KEYS = ("allsky_mv_zenith", "allsky_mv_tucson", "allsky_mv_nogales",
+                "allsky_mv_target", "allsky_extinction_median",
+                "allsky_extinction_target", "allsky_extinction_lost_fraction")
+
 LIVE_FIELDS = ["time", "file", "exposure", "gain", "fratio", "sun_alt", "moon_alt",
                "sky_level", "ccd_temp", "cooler_power", "allsky_mv_zenith",
-               "allsky_mv_tucson", "allsky_mv_nogales", "allsky_mv_best", "best_az",
-               "best_alt", "nstars", "ndetected", "ext_g", "ext_g_all"]
+               "allsky_mv_tucson", "allsky_mv_nogales", "allsky_mv_target",
+               "target_az", "target_alt", "allsky_mv_best", "best_az", "best_alt",
+               "nstars", "ndetected", "ext_g", "ext_g_all"]
 
 
 @dataclass
@@ -72,6 +79,7 @@ class Status:
     science: dict = field(default_factory=dict)
     history: deque = field(default_factory=lambda: deque(maxlen=4000))
     weather: deque = field(default_factory=lambda: deque(maxlen=3000))
+    extinction: deque = field(default_factory=lambda: deque(maxlen=2000))
     log: deque = field(default_factory=lambda: deque(maxlen=200))
     images: dict = field(default_factory=dict)        # name -> JPEG bytes
 
@@ -128,6 +136,8 @@ class Monitor:
         self._live_lock = threading.Lock()
         self._last_latest = 0.0
         self._last_extinction = 0.0
+        self._extinction_future = None
+        self._science_live = False
         self._cooler_setpoint = None
         self._cooler_hot_since = None
         self._count = 0
@@ -412,12 +422,24 @@ class Monitor:
         sci = cfg.science
         if (sci.enabled and out.write_fits and self.pool is not None
                 and meta["sun_alt"] < sci.sun_alt_max):
+            self._science_live = True
+            mid = frame.start + timedelta(seconds=frame.exposure / 2)
+            target = self._pointing(mid)
             fut = self.pool.submit(science.process_frame, str(fits_path), sci.photometry,
-                                   sci.sun_alt_max)
+                                   sci.sun_alt_max, target)
             fut.add_done_callback(lambda f, row=row, day_dir=day_dir:
                                   self._science_done(f, row, day_dir))
         else:
+            if self._science_live:
+                # daylight: blank the night-only values so nothing stale lingers
+                self._science_live = False
+                self.redis.publish(dict.fromkeys(SCIENCE_KEYS, float("nan")))
             self._record(row, day_dir)
+
+    def _pointing(self, when):
+        """The MMT's (az, alt) at ``when``, or None when it is parked or unknown."""
+        return pointing.mmt_altaz(when, self.site.location, self.redis.client,
+                                  self.cfg.output.telescope_file)
 
     def _science_done(self, fut, row, day_dir):
         try:
@@ -429,14 +451,12 @@ class Monitor:
         self._record(row, day_dir)
         if result:
             pub = {k: result[k] for k in ("allsky_mv_zenith", "allsky_mv_tucson",
-                                          "allsky_mv_nogales", "allsky_mv_best",
-                                          "best_az", "best_alt") if k in result}
-            for k in ("ext_g", "ext_g_all", "ndetected", "nstars"):
-                if k in result:
-                    pub[f"allsky_{k}"] = result[k]
-            pub["allsky_sb_timestamp"] = row["time"]
+                                          "allsky_mv_nogales", "allsky_mv_target")}
             self.redis.publish(pub)
-            self.status.update(science=dict(pub))
+            with self.status.lock:
+                self.status.science.update(pub, allsky_mv_best=result["allsky_mv_best"],
+                                           ndetected=result.get("ndetected"),
+                                           sb_time=row["time"])
             self._maybe_extinction(day_dir)
 
     def _maybe_extinction(self, day_dir):
@@ -445,23 +465,44 @@ class Monitor:
             return
         if self.stop_event.is_set():
             return
+        # one map at a time, so a slow build is never overtaken by an older one
+        if self._extinction_future is not None and not self._extinction_future.done():
+            return
         if time.monotonic() - self._last_extinction < sci.extinction_interval / self.clock.speed:
             return
         self._last_extinction = time.monotonic()
-
-        def done(f):
-            try:
-                path = f.result()
-                if path:
-                    log.info("extinction map %s", path)
-            except Exception as err:                           # noqa: BLE001
-                log.warning("extinction map failed: %s", err)
-
         try:
-            self.pool.submit(science.extinction_map, str(day_dir),
-                             sci.extinction_file).add_done_callback(done)
+            self._extinction_future = self.pool.submit(
+                science.extinction_map, str(day_dir), sci.extinction_file, sci.extinction_frames)
         except RuntimeError:                # the pool is shutting down
-            pass
+            return
+        self._extinction_future.add_done_callback(self._extinction_done)
+
+    def _extinction_done(self, fut):
+        from skycam_utils.alcor import alcor_extinction_at
+        try:
+            result = fut.result()
+        except Exception as err:                               # noqa: BLE001
+            log.warning("extinction map failed: %s", err)
+            return
+        if result is None:                  # not enough frames yet tonight
+            return
+        target = float("nan")
+        pos = self._pointing(self.clock.now())
+        if pos is not None:
+            target = alcor_extinction_at(result["path"], *pos)
+        pub = {"allsky_extinction_median": result["median"],
+               "allsky_extinction_target": target,
+               "allsky_extinction_lost_fraction": result["lost_fraction"]}
+        self.redis.publish(pub)
+        with self.status.lock:
+            self.status.science.update(pub, extinction_time=result["tmid"])
+            self.status.extinction.append({"time": result["tmid"] + "Z" if result["tmid"] else
+                                           self.clock.now().isoformat(),
+                                           "median": result["median"], "target": target,
+                                           "lost": result["lost_fraction"]})
+        log.debug("extinction map %s: median %.3f, target %.3f, %.0f%% of stars lost",
+                  result["tmid"], result["median"], target, 100 * result["lost_fraction"])
 
     def _record(self, row, day_dir):
         with self._live_lock:

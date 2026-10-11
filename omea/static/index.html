@@ -10,7 +10,7 @@
   --surface-0: #f3f2ee; --surface-1: #fcfcfb; --border: #dcdbd5;
   --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
   --grid: #e6e5e0; --accent: #2a78d6;
-  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4;
   --good: #008300; --warn: #c98500; --bad: #e34948;
 }
 @media (prefers-color-scheme: dark) {
@@ -19,7 +19,7 @@
     --surface-0: #111110; --surface-1: #1a1a19; --border: #33332f;
     --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
     --grid: #2a2a27; --accent: #3987e5;
-    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
     --good: #2ea043; --warn: #c98500; --bad: #e66767;
   }
 }
@@ -28,7 +28,7 @@
   --surface-0: #111110; --surface-1: #1a1a19; --border: #33332f;
   --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
   --grid: #2a2a27; --accent: #3987e5;
-  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
   --good: #2ea043; --warn: #c98500; --bad: #e66767;
 }
 * { box-sizing: border-box; }
@@ -134,8 +134,11 @@ async function refreshStatus() {
   kv($("#kv-sky"), [
     ["Sun", fmt(s.sun_alt, 1, "°")], ["Moon", fmt(s.moon_alt, 1, "°")],
     ["Sky level", fmt(s.sky_level, 0, " ADU")],
-    ["Zenith", fmt(sc.allsky_mv_zenith, 2, " mag/″²")], ["Darkest cone", fmt(sc.allsky_mv_best, 2, " mag/″²")],
-    ["Extinction (G)", fmt(sc.allsky_ext_g, 2, " mag")], ["Stars detected", sc.allsky_ndetected ?? "–"],
+    ["Zenith", fmt(sc.allsky_mv_zenith, 2, " mag/″²")], ["At MMT", fmt(sc.allsky_mv_target, 2, " mag/″²")],
+    ["Darkest cone", fmt(sc.allsky_mv_best, 2, " mag/″²")],
+    ["Extinction, sky median", fmt(sc.allsky_extinction_median, 2, " mag")],
+    ["Extinction at MMT", fmt(sc.allsky_extinction_target, 2, " mag")],
+    ["Stars lost to cloud", sc.allsky_extinction_lost_fraction == null ? "–" : `${(100 * sc.allsky_extinction_lost_fraction).toFixed(0)} %`], ["Stars detected", sc.ndetected ?? "–"],
   ]);
   const b = s.board || {};
   kv($("#kv-board"), [
@@ -220,9 +223,11 @@ async function refreshPlots() {
     { name: "Zenith", color: "--series-1", points: pts(F, "allsky_mv_zenith") },
     { name: "Darkest cone", color: "--series-2", points: pts(F, "allsky_mv_best") },
     { name: "Tucson dome", color: "--series-3", points: pts(F, "allsky_mv_tucson") },
-    { name: "Nogales dome", color: "--series-4", points: pts(F, "allsky_mv_nogales") } ] });
-  lineChart(host, { title: "Cloud extinction (G, median)", unit: "mag", series: [
-    { name: "Extinction", color: "--series-1", points: pts(F, "ext_g_all") } ] });
+    { name: "Nogales dome", color: "--series-4", points: pts(F, "allsky_mv_nogales") },
+    { name: "At MMT", color: "--series-5", points: pts(F, "allsky_mv_target") } ] });
+  lineChart(host, { title: "Cloud extinction (10-frame map)", unit: "mag", series: [
+    { name: "Sky median", color: "--series-1", points: pts(h.extinction, "median") },
+    { name: "At MMT", color: "--series-2", points: pts(h.extinction, "target") } ] });
   lineChart(host, { title: "Exposure", unit: "s", log: true, digits: 4, series: [
     { name: "Exposure", color: "--series-1", points: pts(F, "exposure") } ] });
   lineChart(host, { title: "Temperature", unit: "°C", digits: 1, series: [

@@ -26,17 +26,29 @@ visualization.
   MMT-pointing overlays come from the same WCS. Latest copies go to
   `/var/www/html/skycam/ImageLastFTP_AllSKY*.jpg`, as before.
 * **Real-time science.** Each night frame (Sun < -12 deg) is passed to
-  skycam_utils in a worker process:
-  * star photometry into `<frame>_phot.csv`, which `alcor_process_night`
-    reuses rather than re-measures;
-  * calibrated sky brightness at the zenith, Tucson and Nogales cones, and the
-    darkest cone;
-  * a cloud-extinction map every 5 minutes, written to
-    `alcor_extinction_latest.fits`.
+  skycam_utils in a worker process. It writes star photometry to
+  `<frame>_phot.csv`, which `alcor_process_night` reuses rather than
+  re-measures. It also measures calibrated sky brightness in 5 deg cones, and
+  rebuilds the cloud-extinction map from the newest 10 frames as a running
+  average (single-frame star magnitudes scatter by ~0.3 mag). Results go to
+  `<day>/omea_live.csv` and to redis.
+* **Redis.** These keys are floats, or `nan` when there is no measurement. All
+  of them are set to `nan` when the night ends.
 
-  Results go to redis (`allsky_mv_*`, `allsky_ext_g*`) and to `<day>/omea_live.csv`.
-* **Sensors.** Polls the RS232 board every 30 s and publishes `allsky_*_temp`
-  and `allsky_*_rh` to redis. It also appends the Skywatch-format
+  | Key | Meaning |
+  |---|---|
+  | `allsky_mv_zenith` | surface brightness at the zenith, V mag/arcsec² (5 deg cone median) |
+  | `allsky_mv_tucson` | over Tucson, cone at az 0, alt 15 |
+  | `allsky_mv_nogales` | over Nogales, cone at az 190, alt 15 |
+  | `allsky_mv_target` | at the MMT pointing (mid-exposure; `nan` when parked) |
+  | `allsky_extinction_median` | median extinction across the sky, V mag. Undetected stars count as the most extinguished; when over half are lost, the largest measured value is published as a floor |
+  | `allsky_extinction_lost_fraction` | share of the map's stars not detected at all; near 1 means overcast |
+  | `allsky_extinction_target` | extinction interpolated from the map at the MMT pointing; `nan` where the map has no stars nearby |
+
+  The pointing comes from the mount's redis keys, as in skycam-utils'
+  `mmt_extinction_redis.py`, which this replaces.
+* **Sensors.** Polls the RS232 board every 30 s and publishes the same
+  `allsky_*_temp` and `allsky_*_rh` keys `tcs_logger.py` did. It also appends the Skywatch-format
   `DataOut_Weather.csv` that `tcs_logger.py` reads.
 * **Web status** at `http://<host>:8081/`: the latest image, panorama and
   keogram, camera, sky and enclosure state, the night's plots, and the log.
