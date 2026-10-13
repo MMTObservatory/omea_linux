@@ -143,6 +143,11 @@ def display_rgb(cube):
     return (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
 
 
+def _label(draw, xy, text, font, fill, anchor="la"):
+    """Overlay text with a dark outline, legible on bright sky and dark alike."""
+    draw.text(xy, text, font=font, fill=fill, anchor=anchor, stroke_width=2, stroke_fill="black")
+
+
 def _box(draw, xy, text, font, anchor="la", fill="white"):
     x0, y0, x1, y1 = draw.textbbox(xy, text, font=font, anchor=anchor)
     draw.rectangle((x0 - 4, y0 - 3, x1 + 4, y1 + 3), fill="black", outline="white")
@@ -175,7 +180,7 @@ def render_allsky(proj, rgb, info, location, telescope=None):
                      outline=(160, 160, 160))
         if 10 <= alt <= 80:
             x, y = proj.to_display(135.0, alt + 1.5)
-            draw.text((x, y), f"{alt}°", font=small, fill=(200, 200, 200), anchor="mm")
+            _label(draw, (x, y), f"{alt}°", small, (220, 220, 220), anchor="mm")
     r = 90 * proj.scale
     draw.line((proj.cx, proj.cy - r, proj.cx, proj.cy + r), fill=(160, 160, 160))
     draw.line((proj.cx - r, proj.cy, proj.cx + r, proj.cy), fill=(160, 160, 160))
@@ -193,13 +198,18 @@ def render_allsky(proj, rgb, info, location, telescope=None):
             if e > 5:
                 x, y = proj.to_display(a, e)
                 draw.ellipse((x - 3, y - 3, x + 3, y + 3), outline=(255, 120, 120))
-                draw.text((x + 6, y), name, font=small, fill=(255, 140, 140), anchor="lm")
+                _label(draw, (x + 6, y), name, small, (255, 140, 140), anchor="lm")
         for body, color in [(p, (255, 220, 90)) for p in PLANETS] + [("moon", (255, 255, 255))]:
             a, e = _altaz(get_body(body, Time(when), location), when, location)
             if e > 0:
                 x, y = proj.to_display(a, e)
                 draw.ellipse((x - 5, y - 5, x + 5, y + 5), outline=color)
-                draw.text((x + 8, y), body.capitalize(), font=small, fill=color, anchor="lm")
+                _label(draw, (x + 8, y), body.capitalize(), small, color, anchor="lm")
+        a, e = _altaz(get_body("sun", Time(when), location), when, location)
+        if e > -1:
+            x, y = proj.to_display(a, e)
+            draw.ellipse((x - 11, y - 11, x + 11, y + 11), fill=(255, 230, 0), outline="black")
+            _label(draw, (x + 15, y), "Sun", small, (255, 230, 0), anchor="lm")
     except Exception as err:                                  # noqa: BLE001
         log.debug("star overlay skipped: %s", err)
 
@@ -210,7 +220,7 @@ def render_allsky(proj, rgb, info, location, telescope=None):
             color = (80, 255, 80) if fresh else (255, 60, 60)
             draw.line((x - 18, y, x + 18, y), fill=color, width=3)
             draw.line((x, y - 18, x, y + 18), fill=color, width=3)
-            draw.text((x + 20, y - 20), "MMT", font=small, fill=color)
+            _label(draw, (x + 20, y - 20), "MMT", small, color)
 
     local = info["local"]
     _box(draw, (6, h - 8), f"LT {local:%Y-%m-%d %H:%M:%S}", big, anchor="lb")
