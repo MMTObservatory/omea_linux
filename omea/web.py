@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 
@@ -48,7 +49,7 @@ def make_handler(status):
             if path in ("/", "/index.html"):
                 self._send(page, "text/html; charset=utf-8")
             elif path == "/api/status":
-                self._json(status.snapshot())
+                self._json({**status.snapshot(), "server_time": time.time()})
             elif path == "/api/history":
                 with status.lock:
                     frames = list(status.history)

@@ -114,20 +114,25 @@ window.addEventListener("hashchange", showTab);
 const fmt = (v, d = 1, unit = "") => (v === null || v === undefined || Number.isNaN(v)) ? "–" : `${Number(v).toFixed(d)}${unit}`;
 function exposureText(e) { return e >= 1 ? `${e.toFixed(1)} s` : `${(e * 1000).toFixed(2)} ms`; }
 function kv(el, rows) { el.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join(""); }
-function age(t) { if (!t) return "–"; const s = Date.now() / 1000 - t; return s < 120 ? `${s.toFixed(0)} s ago` : `${(s / 60).toFixed(0)} min ago`; }
+// server clock minus browser clock, so ages are right on a skewed client
+let clockOffset = 0;
+const serverNow = () => Date.now() / 1000 + clockOffset;
+function age(t) { if (!t) return "–"; const s = Math.max(0, serverNow() - t); return s < 120 ? `${s.toFixed(0)} s ago` : `${(s / 60).toFixed(0)} min ago`; }
 
 async function getJSON(url) { const r = await fetch(url, { cache: "no-store" }); return r.json(); }
 
 async function refreshStatus() {
   const s = await getJSON("/api/status");
-  const stale = s.last_frame_time && (Date.now() / 1000 - s.last_frame_time > 180);
+  if (s.server_time) clockOffset = s.server_time - Date.now() / 1000;
+  lastFrameTime = s.last_frame_time;
+  const stale = s.last_frame_time && (serverNow() - s.last_frame_time > 180);
   $("#state").innerHTML = `${s.mode || "–"} · ${s.state} · ${s.frames} frames` +
     (stale ? ` · <span class="badge" style="color:var(--bad)">no frame for ${age(s.last_frame_time)}</span>` : "");
   kv($("#kv-camera"), [
     ["Camera", s.camera || "–"], ["Exposure", exposureText(s.exposure || 0)], ["Gain", s.gain],
     ["Iris", s.fratio ? `f/${s.fratio.toFixed(1)}` : "–"], ["Focus", s.focus],
     ["Sensor", `${fmt(s.ccd_temp, 1, " °C")} (set ${fmt(s.cooler_target, 1, " °C")})`],
-    ["Cooler power", fmt(s.cooler_power, 0, " %")], ["Last frame", age(s.last_frame_time)],
+    ["Cooler power", fmt(s.cooler_power, 0, " %")], ["Last frame", `<span id="last-frame">${lastFrameText()}</span>`],
     ["Dropped", s.dropped],
   ]);
   const sc = s.science || {};
@@ -149,6 +154,14 @@ async function refreshStatus() {
     ["Dome heater", b.heater_on === undefined ? "–" : (b.heater_on ? "ON" : "off") + (b.auto_heat ? " (auto)" : "")],
   ]);
 }
+
+let lastFrameTime = null;
+function lastFrameText() {
+  if (!lastFrameTime) return "–";
+  const t = new Date(lastFrameTime * 1000).toLocaleTimeString([], { hour12: false });
+  return `${t} (${age(lastFrameTime)})`;
+}
+setInterval(() => { const el = $("#last-frame"); if (el) el.textContent = lastFrameText(); }, 1000);
 
 function refreshImage(id, name) {
   const img = $(id); const url = `/image/${name}.jpg?t=${Date.now()}`;
