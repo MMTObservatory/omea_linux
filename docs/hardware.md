@@ -16,35 +16,45 @@ own without any software: it works from thresholds stored in the camera.
 WSL2 reaches USB devices through [usbipd-win](https://github.com/dorssel/usbipd-win).
 The WSL kernel here (6.18) already has `usbip`, `vhci-hcd` and `ftdi_sio`.
 
-On Windows, as Administrator:
+On Windows, once, as Administrator:
 
 ```powershell
 winget install usbipd
-usbipd list                                  # find the BUSIDs of 03c3:294f and 0403:6015
-usbipd bind --busid <camera-busid>
-usbipd bind --busid <ftdi-busid>
-usbipd attach --wsl --busid <camera-busid> --auto-attach
-usbipd attach --wsl --busid <ftdi-busid> --auto-attach
+usbipd bind --hardware-id 03c3:294f          # ZWO camera
+usbipd bind --hardware-id 0403:6015          # FTDI serial adapter
 ```
 
-`--auto-attach` re-attaches after a camera power cycle or replug, but only while
-that command runs. Start it at log-in the same way the cyclop host keeps WSL
-alive (a script in the Startup folder), or use `usbipd policy` to allow the
-devices and attach them from a WSL boot script.
+Binding persists; after it, attaching needs no elevation. Attaching is kept up
+by [windows/omea-usbip.ps1](../windows/omea-usbip.ps1), which waits for WSL and
+then runs `usbipd attach --wsl --hardware-id <id> --auto-attach` for each device
+in a hidden window (`--auto-attach` re-attaches after a replug or WSL restart,
+but only while that process runs). On this host:
+
+* `C:\Users\skycam\omea\omea-usbip.ps1` is the script; it logs to
+  `%LOCALAPPDATA%\omea-usbip.log`.
+* `windows/omea-usbip.cmd` is in the Startup folder
+  (`shell:startup`) next to the "Ubuntu" shortcut that starts WSL at log-in.
+* The "Skywatch" startup shortcut was moved to
+  `C:\Users\skycam\omea\disabled-startup\`; put it back to return to Skywatch.
+
+To install on another host, copy `omea-usbip.ps1` (with CRLF line endings) to
+`%USERPROFILE%\omea\` and `omea-usbip.cmd` to `shell:startup`.
 
 In WSL:
 
 ```bash
 lsusb                                        # 03c3:294f ZWO, 0403:6015 FTDI
-sudo cp lib/99-asi.rules /etc/udev/rules.d/  # camera access without root,
-                                             # and a larger usbfs buffer
-sudo udevadm control --reload && sudo udevadm trigger
 sudo usermod -aG dialout $USER               # /dev/ttyUSB0
+# the ASI SDK needs a usbfs buffer larger than one 23 MB frame (default 16 MB);
+# without it every exposure fails
+echo 'w /sys/module/usbcore/parameters/usbfs_memory_mb - - - - 256' | \
+    sudo tee /etc/tmpfiles.d/usbfs.conf
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/usbfs.conf
+loginctl enable-linger $USER                 # run the user service from WSL boot
 ```
 
-Raise the USB buffer the ASI SDK needs for full frames (the rule file does this
-on attach; check with `cat /sys/module/usbcore/parameters/usbfs_memory_mb`, which
-should read 200).
+The camera's device node is world-writable under WSL, so `lib/99-asi.rules` is
+only needed on a native Linux machine.
 
 ### USB/IP caveat
 

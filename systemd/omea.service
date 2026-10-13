@@ -5,6 +5,8 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/omea_linux
+# REDISPW for the redis publisher, when enabled
+EnvironmentFile=-%h/.config/omea/env
 ExecStart=%h/conda/envs/skycam/bin/omea -c %h/omea_linux/config.toml run
 Restart=on-failure
 RestartSec=30
