@@ -84,7 +84,8 @@ def temp_to_adu(temp):
 
 
 def adu_to_rh(value, factor, offset):
-    return (value / ADC_FULL - offset) * factor
+    # the sensor reads past 100 % when saturated; Skywatch clamped it
+    return min(max((value / ADC_FULL - offset) * factor, 0.0), 100.0)
 
 
 def rh_to_adu(rh, factor, offset):

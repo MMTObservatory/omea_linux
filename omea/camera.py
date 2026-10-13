@@ -86,6 +86,11 @@ class ZwoCamera:
         if asi.HIGH_SPEED_MODE in self.caps:
             self.lib.set(self.id, asi.HIGH_SPEED_MODE, 0)
         self.lib.set(self.id, asi.FLIP, 0)
+        # the SDK scales RAW16 R and B (bias included) by WB_R/50 and WB_B/50;
+        # Skywatch frames have equal bias in all three planes, i.e. neutral
+        for control in (asi.WB_R, asi.WB_B):
+            if control in self.caps:
+                self.lib.set(self.id, control, 50)
         log.info("opened %s (SDK %s), %dx%d %s, %d-bit", self.name,
                  self.lib.sdk_version(), width, height,
                  asi.BAYER_NAMES.get(info.BayerPattern, "?"), info.BitDepth)
