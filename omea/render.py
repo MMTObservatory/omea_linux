@@ -243,13 +243,15 @@ def render_unwrap(proj, rgb):
     nw = int(round(360 * proj.unwrap_ppd))
     img = Image.fromarray(proj.sample(rgb, "pano").reshape(nh, nw, 3))
     draw = ImageDraw.Draw(img)
-    font = _font(20)
+    # sized like Skywatch's: the page shows the panorama at about 1/4 scale
+    font, r = _font(48), 34
     y0 = (proj.unwrap_alt[1] - 0.0) * proj.unwrap_ppd        # the horizon row
-    draw.line((0, y0, nw, y0), fill=(220, 30, 30), width=2)
+    draw.line((0, y0, nw, y0), fill=(220, 30, 30), width=3)
+    yc = nh - r - 3
     for label, az in (("N", 0), ("E", 90), ("S", 180), ("W", 270), ("N", 360)):
-        x = min(max(az * proj.unwrap_ppd, 16), nw - 17)
-        draw.ellipse((x - 15, nh - 34, x + 15, nh - 4), fill="black", outline=(220, 30, 30))
-        draw.text((x, nh - 19), label, font=font, fill="white", anchor="mm")
+        x = min(max(az * proj.unwrap_ppd, r + 2), nw - r - 3)
+        draw.ellipse((x - r, yc - r, x + r, yc + r), fill="black", outline=(220, 30, 30), width=3)
+        draw.text((x, yc), label, font=font, fill="white", anchor="mm")
     return img
 
 
