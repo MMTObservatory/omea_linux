@@ -344,7 +344,7 @@ class Monitor:
         epoch = (cal["xcen"], cal["ycen"], cal["rotation"], cal["horizon_radius"])
         if self.projector is None or epoch != self._projector_epoch:
             wcs, cal = render.alcor_wcs(when)
-            self.projector = render.Projector(wcs, cal["horizon_radius"])
+            self.projector = render.Projector(wcs)
             self._projector_epoch = epoch
         return self.projector
 

@@ -66,16 +66,16 @@ def _named_stars():
 class Projector:
     """Index maps from display images into the raw (1411, 1422) frame."""
 
-    def __init__(self, wcs, horizon_radius, shape=(1411, 1422), size=SIZE,
+    def __init__(self, wcs, shape=(1411, 1422), size=SIZE,
                  alt_min=-3.0, unwrap_alt=(-3.0, 42.0), unwrap_ppd=12.0):
         self.wcs = wcs
         self.shape = shape
         self.size = size
         w, h = size
-        # fisheye: zenith at the centre, 90 deg of zenith distance spans the
-        # same radius it does on the sensor, north up and east LEFT (a sky
-        # view from below)
-        self.scale = horizon_radius / 90.0                # px per deg
+        # fisheye: zenith at the centre, equidistant in zenith distance with
+        # the whole circle down to alt_min inside the frame (as Skywatch drew
+        # it), north up and east LEFT (a sky view from below)
+        self.scale = (min(w, h) / 2.0 - 24) / (90.0 - alt_min)   # px per deg
         self.cx, self.cy = (w - 1) / 2.0, (h - 1) / 2.0
         yy, xx = np.mgrid[0:h, 0:w].astype(float)
         dx, dy = xx - self.cx, self.cy - yy               # dy up = north
