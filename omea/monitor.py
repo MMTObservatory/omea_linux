@@ -187,9 +187,26 @@ class Monitor:
             self.status.history.extend(frames)
             self.status.extinction.extend(extinction)
             self.status.weather.extend(weather)
+        self._seed_exposure(frames, now)
         if frames or extinction or weather:
             log.info("loaded %d frames, %d extinction maps and %d sensor readings since %s",
                      len(frames), len(extinction), len(weather), noon.isoformat(timespec="minutes"))
+
+    def _seed_exposure(self, frames, now, max_age=900):
+        """Start the exposure from the last frame, if it is recent (a restart)."""
+        if not frames:
+            return
+        last = frames[-1]
+        try:
+            age = (now - datetime.fromisoformat(last["time"])).total_seconds()
+            if not 0 <= age < max_age:
+                return
+            self.controller.seed(float(last["exposure"]), float(last["gain"]),
+                                 float(last["fratio"]), float(last["sky_level"]))
+        except (KeyError, TypeError, ValueError):
+            return
+        log.info("exposure starts from the last frame (%s s, gain %g, f/%g, sky %g ADU)",
+                 last["exposure"], last["gain"], last["fratio"], last["sky_level"])
 
     def _start_thread(self, target, name):
         t = threading.Thread(target=self._guard, args=(target,), name=name, daemon=True)

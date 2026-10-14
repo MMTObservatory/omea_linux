@@ -46,6 +46,15 @@ class ExposureController:
         self.clip = image_cfg.clip
         self.mask = meter_mask(shape, cfg.meter_x, cfg.meter_y, cfg.meter_radius)
         self.total = None               # set by the first setting() call
+        self._seed = None               # (total, sky level, f-ratio) of a previous frame
+
+    def seed(self, exposure, gain, fratio, level):
+        """
+        Start from a frame taken before a restart (exposure, gain, f-ratio and
+        its sky level above bias), instead of guessing.
+        """
+        if exposure > 0 and fratio > 0 and math.isfinite(level):
+            self._seed = (exposure * gain_factor(gain), level, fratio)
 
     def _split(self, total, night):
         c = self.cfg
@@ -63,10 +72,22 @@ class ExposureController:
         return exposure, int(gain)
 
     def setting(self, night, fratio):
-        if self.total is None:          # first frame: dark-sky values at night
-            c = self.cfg
-            self.total = (c.max_exposure * gain_factor(c.night_gain) if night
+        c = self.cfg
+        if self.total is None and self._seed is not None:
+            total, level, seed_fratio = self._seed
+            # the seed frame's bias is not stored: ~2000 ADU of a 32767 clip
+            span = self.clip - 2000
+            target = (c.night_target if night else c.day_target) * span
+            factor = 0.1 if level >= 0.9 * span else target / max(level, 1.0)
+            self.total = (total * min(max(factor, 0.05), 20.0)
+                          * (fratio / seed_fratio) ** 2)
+        elif self.total is None:
+            # nothing to go on. At night 1/20 of the dark-sky exposure: a dark
+            # sky reaches max_exposure on the next frame (the controller steps up
+            # to 20x), while twilight or moonlight saturates far less
+            self.total = (c.max_exposure / 20 * gain_factor(c.night_gain) if night
                           else c.start_exposure * gain_factor(c.min_gain))
+        self._seed = None
         exposure, gain = self._split(self.total, night)
         # keep self.total consistent with what the camera can actually do
         self.total = exposure * gain_factor(gain)

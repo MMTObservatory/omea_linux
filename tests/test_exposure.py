@@ -56,6 +56,22 @@ def test_iris_change_is_fed_forward():
     assert ctrl.total == pytest.approx(3.0 * (2.8 / 16) ** 2)
 
 
-def test_first_night_frame_starts_at_dark_sky_values():
-    s = ExposureController(ExposureConfig(), ImageConfig()).setting(True, 2.8)
-    assert (s.exposure, s.gain) == (20.0, 250)
+def test_cold_start_at_night_reaches_dark_sky_in_one_step():
+    ctrl = ExposureController(ExposureConfig(), ImageConfig())
+    s = ctrl.setting(True, 2.8)
+    assert (s.exposure, s.gain) == (1.0, 250)
+    # a dark sky (pins at 20 s): the next frame is already there
+    ctrl.update(sky(0.5 * gain_factor(250) * 1.0 * 30), s.exposure, s.gain, True)
+    assert ctrl.setting(True, 2.8).exposure == 20.0
+
+
+def test_restart_in_twilight_starts_from_the_last_frame():
+    # tonight's last day frame before a restart: 20 s, gain 30, f/16, 4493 ADU
+    ctrl = ExposureController(ExposureConfig(), ImageConfig())
+    ctrl.seed(20.0, 30, 16.0, 4493.0)
+    s = ctrl.setting(True, 2.8)
+    assert s.gain == 250
+    expect = (20.0 * gain_factor(30) * (0.25 * 30767 / 4493) * (2.8 / 16) ** 2
+              / gain_factor(250))
+    assert s.exposure == pytest.approx(expect)
+    assert s.exposure < 0.2                    # not 20 s: nothing saturates
