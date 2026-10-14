@@ -82,7 +82,8 @@ omea -c config.toml run               # the real thing
 # 30x faster, writing only under ./data (no redis)
 omea run --simulate --archive /mnt/d/skycam/2026-10-09 --start 2026-10-10T01:20 --speed 30
 
-# hardware utilities
+# hardware utilities: they need the board/camera, so stop the service first
+# (systemctl --user stop omea); thresholds and power are kept by the board
 omea iris 2.8
 omea focus 1320
 omea heater --temp 7 --rh 90 --power 50       # automatic mode, thresholds

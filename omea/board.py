@@ -147,8 +147,16 @@ class AlcorBoard:
         self.cfg = cfg
         if port is None:
             import serial
-            port = serial.Serial(cfg.port, 115200, bytesize=8, parity="N",
-                                 stopbits=1, timeout=0.25)
+            # exclusive: a second program (the CLI while the service runs) would
+            # read the other's replies
+            try:
+                port = serial.Serial(cfg.port, 115200, bytesize=8, parity="N",
+                                     stopbits=1, timeout=0.25, exclusive=True)
+            except serial.SerialException as err:
+                if "lock" in str(err):
+                    raise BoardError(f"{cfg.port} is in use, probably by the omea service "
+                                     "(systemctl --user stop omea)") from err
+                raise
         self.port = port
         self.lock = threading.Lock()
         self.firmware = None
