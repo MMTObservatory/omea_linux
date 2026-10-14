@@ -50,6 +50,72 @@ def append_weather(path, line):
         f.write(line)
 
 
+def read_weather(path, since, tz, max_bytes=1 << 20):
+    """
+    Board readings from the end of a ``DataOut_Weather.csv`` taken at or after
+    ``since`` (unix time), as the web history rows. Only the last ``max_bytes``
+    are read: the file grows for years. ``tz`` is the local zone of its dates.
+    """
+    from .board import dew_point
+    rows = []
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - max_bytes))
+            lines = f.read().decode("latin-1").splitlines()[1:]   # first may be partial
+    except OSError:
+        return rows
+    for line in lines:
+        p = line.split(";")
+        try:
+            local = _DELPHI_EPOCH + timedelta(days=float(p[0]))
+            t = local.replace(tzinfo=tz).timestamp()
+            temp_ext, temp_int, temp_hot, ccd = (float(v) for v in p[2:6])
+            rh_ext, rh_int = float(p[6]), float(p[7])
+        except (ValueError, IndexError):
+            continue
+        if t < since:
+            continue
+        rows.append({"time": t, "temp_ext": temp_ext, "rh_ext": rh_ext,
+                     "temp_int": temp_int, "rh_int": rh_int, "temp_hot": temp_hot,
+                     "dew_point": dew_point(temp_ext, rh_ext), "heater_on": p[8] == "TRUE",
+                     "ccd_temp": ccd if ccd != -1.0 else float("nan")})
+    return rows
+
+
+def append_csv(path, fields, row):
+    """Append ``row`` to a CSV, writing the header when the file is new."""
+    import csv
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new = not path.exists()
+    with open(path, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        if new:
+            w.writeheader()
+        w.writerow({k: (f"{v:.5g}" if isinstance(v, float) else v) for k, v in row.items()})
+
+
+def read_csv(path):
+    """Rows of a CSV written by :func:`append_csv`, numbers as floats ('' -> NaN)."""
+    import csv
+    try:
+        with open(path, newline="") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return []
+
+    def num(v):
+        if v == "":
+            return float("nan")
+        try:
+            return float(v)
+        except ValueError:
+            return v
+
+    return [{k: num(v) for k, v in r.items()} for r in rows]
+
+
 def save_jpeg(img, path, quality=95):
     """Write a PIL image as JPEG atomically (the web server may be reading)."""
     import io

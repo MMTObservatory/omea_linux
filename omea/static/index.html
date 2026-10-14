@@ -194,12 +194,14 @@ function lineChart(host, { title, unit, series, invert = false, log = false, dig
   const yt = log ? niceTicks(lo, hi, 4).map(v => 10 ** v) : niceTicks(lo, hi, 5);
   for (const v of yt) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${css("--grid")}"/>` +
     `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="${css("--text-muted")}">${log ? (v >= 1 ? v.toFixed(0) : v.toPrecision(1)) : +v.toFixed(3)}</text>`;
-  const hour = 3600, stepH = (t1 - t0) > 12 * hour ? 3 : (t1 - t0) > 4 * hour ? 1 : 0.5;
-  for (let t = Math.ceil(t0 / (stepH * hour)) * stepH * hour; t <= t1; t += stepH * hour) {
+  // time ticks: the smallest round step (1 min .. 6 h) giving at most 7 labels
+  const step = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360].map(mm => mm * 60)
+    .find(st => (t1 - t0) / st <= 7) || 21600;
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) {
     const d = new Date(t * 1000), lab = `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
     g += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="${css("--text-muted")}">${lab}</text>`;
   }
-  g += `<text x="${W - m.r}" y="${H - 6}" text-anchor="end" font-size="11" fill="${css("--text-muted")}">UT</text>`;
+  g += `<text x="4" y="${H - 6}" font-size="11" fill="${css("--text-muted")}">UT</text>`;
   g += `<text x="4" y="${m.t + 8}" font-size="11" fill="${css("--text-muted")}">${unit}</text>`;
   for (const s of live) {
     let d = "", prev = null;

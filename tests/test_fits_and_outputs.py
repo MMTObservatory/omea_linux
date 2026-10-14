@@ -80,3 +80,31 @@ def test_weather_line_matches_skywatch():
     line = outputs.weather_line(local, d, -5.3)
     # a real line from DataOut_Weather.csv, 2026-10-10 6:16:54 PM
     assert line == "46305.76174;10/10/2026 6:16:54 PM;10.9;16.2;12.3;-5.3;89;46;FALSE;-1.00;-1.0;-1;\r\n"
+
+
+def test_weather_history_round_trips(tmp_path):
+    site = Site(Config().site)
+    path = tmp_path / "DataOut_Weather.csv"
+    d = board.BoardData(time=0, temp_ext=10.9, rh_ext=89.2, temp_int=16.2, rh_int=46.4,
+                        temp_hot=12.3, heater_on=True, auto_heat=True, heater_power=50,
+                        dew_point=9.2)
+    t0 = datetime(2026, 10, 11, 1, 16, 54, tzinfo=timezone.utc)
+    for k in range(3):
+        outputs.append_weather(path, outputs.weather_line(site.local(t0 + timedelta(minutes=k)),
+                                                          d, -5.3))
+    rows = outputs.read_weather(path, (t0 + timedelta(seconds=30)).timestamp(), site.tz)
+    assert [r["time"] for r in rows] == pytest.approx(
+        [(t0 + timedelta(minutes=k)).timestamp() for k in (1, 2)], abs=1)
+    assert rows[0]["temp_ext"] == 10.9 and rows[0]["rh_ext"] == 89 and rows[0]["heater_on"]
+    assert rows[0]["ccd_temp"] == -5.3
+
+
+def test_live_csv_round_trips(tmp_path):
+    path = tmp_path / "omea_live.csv"
+    outputs.append_csv(path, ["time", "file", "exposure", "nstars"],
+                       {"time": "2026-10-13T23:25:48+00:00", "file": "a.fits.bz2",
+                        "exposure": 0.0048141, "nstars": float("nan")})
+    (row,) = outputs.read_csv(path)
+    assert row["time"] == "2026-10-13T23:25:48+00:00" and row["file"] == "a.fits.bz2"
+    assert row["exposure"] == pytest.approx(0.0048141, rel=1e-4)
+    assert np.isnan(row["nstars"])

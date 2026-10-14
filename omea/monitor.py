@@ -15,7 +15,6 @@ Science (skycam_utils photometry and sky brightness) runs in a process pool so
 a slow frame never delays the next exposure.
 """
 
-import csv
 import logging
 import math
 import queue
@@ -24,7 +23,7 @@ import time
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +50,7 @@ LIVE_FIELDS = ["time", "file", "exposure", "gain", "fratio", "sun_alt", "moon_al
                "allsky_mv_tucson", "allsky_mv_nogales", "allsky_mv_target",
                "target_az", "target_alt", "allsky_mv_best", "best_az", "best_alt",
                "nstars", "ndetected", "ext_g", "ext_g_all"]
+EXTINCTION_FIELDS = ["time", "median", "target", "lost"]
 
 
 @dataclass
@@ -151,6 +151,7 @@ class Monitor:
 
     def run(self, max_frames=None):
         cfg = self.cfg
+        self._load_history()
         if cfg.science.enabled:
             self.pool = ProcessPoolExecutor(max_workers=cfg.science.workers)
         self._start_thread(self._products_loop, "products")
@@ -170,6 +171,25 @@ class Monitor:
             if self.board is not None:
                 self.board.close()
             self.status.update(state="stopped")
+
+    def _load_history(self):
+        """Refill the web plots from tonight's files, so a restart loses nothing."""
+        now = self.clock.now()
+        day = self.site.day_dir(now)
+        day_dir = Path(self.cfg.output.data_dir) / day
+        noon = datetime.strptime(day, "%Y-%m-%d").replace(hour=12, tzinfo=self.site.tz)
+        frames = outputs.read_csv(day_dir / "omea_live.csv")
+        extinction = outputs.read_csv(day_dir / "omea_extinction.csv")
+        weather = (outputs.read_weather(self.cfg.output.weather_csv, noon.timestamp(),
+                                        self.site.tz)
+                   if self.cfg.output.weather_csv else [])
+        with self.status.lock:
+            self.status.history.extend(frames)
+            self.status.extinction.extend(extinction)
+            self.status.weather.extend(weather)
+        if frames or extinction or weather:
+            log.info("loaded %d frames, %d extinction maps and %d sensor readings since %s",
+                     len(frames), len(extinction), len(weather), noon.isoformat(timespec="minutes"))
 
     def _start_thread(self, target, name):
         t = threading.Thread(target=self._guard, args=(target,), name=name, daemon=True)
@@ -473,9 +493,10 @@ class Monitor:
                 science.extinction_map, str(day_dir), sci.extinction_file, sci.extinction_frames)
         except RuntimeError:                # the pool is shutting down
             return
-        self._extinction_future.add_done_callback(self._extinction_done)
+        self._extinction_future.add_done_callback(
+            lambda f: self._extinction_done(f, day_dir))
 
-    def _extinction_done(self, fut):
+    def _extinction_done(self, fut, day_dir):
         from skycam_utils.alcor import alcor_extinction_at
         try:
             result = fut.result()
@@ -492,27 +513,19 @@ class Monitor:
                "allsky_extinction_target": target,
                "allsky_extinction_lost_fraction": result["lost_fraction"]}
         self.redis.publish(pub)
+        row = {"time": result["tmid"] + "Z" if result["tmid"] else self.clock.now().isoformat(),
+               "median": result["median"], "target": target, "lost": result["lost_fraction"]}
         with self.status.lock:
             self.status.science.update(pub, extinction_time=result["tmid"])
-            self.status.extinction.append({"time": result["tmid"] + "Z" if result["tmid"] else
-                                           self.clock.now().isoformat(),
-                                           "median": result["median"], "target": target,
-                                           "lost": result["lost_fraction"]})
+            self.status.extinction.append(row)
+        outputs.append_csv(day_dir / "omea_extinction.csv", EXTINCTION_FIELDS, row)
         log.debug("extinction map %s: median %.3f, target %.3f, %.0f%% of stars lost",
                   result["tmid"], result["median"], target, 100 * result["lost_fraction"])
 
     def _record(self, row, day_dir):
         with self._live_lock:
             self.status.history.append(dict(row))
-            path = day_dir / "omea_live.csv"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            new = not path.exists()
-            with open(path, "a", newline="") as f:
-                w = csv.DictWriter(f, fieldnames=LIVE_FIELDS, extrasaction="ignore")
-                if new:
-                    w.writeheader()
-                w.writerow({k: (f"{v:.5g}" if isinstance(v, float) else v)
-                            for k, v in row.items()})
+            outputs.append_csv(day_dir / "omea_live.csv", LIVE_FIELDS, row)
 
     # -- sensor board ------------------------------------------------------------
 
