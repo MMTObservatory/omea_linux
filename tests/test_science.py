@@ -103,9 +103,9 @@ def test_fog_reports_opaque_extinction(tmp_path):
     assert result["tmid"].startswith("2026-10-14T03:00:")      # MST + 7 h
 
 
-def test_display_badpix_repair_matches_skycam_utils():
-    """The fast display repair gives skycam_utils' local-median repair exactly."""
-    from skycam_utils.alcor.masks import _apply_badpix_repair, load_alcor_badpix_mask
+def test_display_badpix_repair():
+    """The display products get the nearest-date mask's repair; the input is left raw."""
+    from skycam_utils.alcor.masks import load_alcor_badpix_mask
     from omea.render import repair_badpix
 
     when = datetime(2026, 10, 14, 4, 0, tzinfo=timezone.utc)
@@ -114,6 +114,6 @@ def test_display_badpix_repair_matches_skycam_utils():
     cube = rng.normal(1000, 30, mask.shape).astype(np.int16)
     cube[mask] = 30000
     out = repair_badpix(cube, when)
-    assert np.array_equal(out, _apply_badpix_repair(cube, mask))
     assert out[mask].max() < 2000
+    assert np.array_equal(out[~mask], cube[~mask])
     assert cube[mask].min() == 30000                    # input left alone
