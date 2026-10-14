@@ -136,6 +136,40 @@ class Projector:
         return out
 
 
+@lru_cache(maxsize=2)
+def _badpix_mask(day):
+    """skycam_utils' bad-pixel mask nearest in date to ``day``, or None."""
+    from skycam_utils.alcor import load_alcor_badpix_mask
+    try:
+        mask, mdate = load_alcor_badpix_mask(day)
+    except (OSError, ValueError) as err:
+        log.warning("no bad-pixel mask: %s", err)
+        return None
+    if mask is not None:
+        log.info("display bad-pixel mask %s (%d pixels)", mdate, int(mask.sum()))
+    return mask
+
+
+def repair_badpix(cube, when, ksize=5):
+    """
+    A copy of ``cube`` with the flagged pixels of the nearest-date mask replaced
+    by their local ``ksize`` x ``ksize`` median, per channel -- the repair
+    skycam_utils' ``load_alcor_fits`` makes, computed only at the flagged pixels
+    (a full-frame median filter takes ~2 s). The FITS files stay raw.
+    """
+    mask = _badpix_mask(when.date())
+    if mask is None or mask.shape != cube.shape:
+        return cube
+    h = ksize // 2
+    padded = np.pad(np.asarray(cube, dtype=np.float32), ((0, 0), (h, h), (h, h)), mode="symmetric")
+    c, y, x = np.nonzero(mask)
+    dy, dx = np.mgrid[-h:h + 1, -h:h + 1]
+    windows = padded[c[:, None], y[:, None] + h + dy.ravel(), x[:, None] + h + dx.ravel()]
+    out = np.array(cube, copy=True)
+    out[c, y, x] = np.median(windows, axis=1).astype(out.dtype)
+    return out
+
+
 def display_rgb(cube):
     """skycam_utils' display stretch (bias-subtracted, per-channel balance), as uint8."""
     from skycam_utils.alcor.display import _alcor_display_rgb

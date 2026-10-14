@@ -434,7 +434,7 @@ class Monitor:
             write_fits_bz2(fits_path, cube, header)
 
         proj = self._projector_for(when)
-        rgb = render.display_rgb(cube)
+        rgb = render.display_rgb(render.repair_badpix(cube, when))
         # the same pointing the science uses: the mount's redis keys, else the
         # telescope file; the zenith when parked, no marker when unknown
         tel = self._pointing(when, parked=(0.0, 90.0))

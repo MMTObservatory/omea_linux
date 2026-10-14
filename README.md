@@ -23,7 +23,10 @@ visualization.
 * **Display products.** The annotated all-sky JPEG, the `Unwrap_` panorama and
   the 24 h keogram, drawn from skycam_utils' calibrated WCS rather than a
   hand-set circle, so they are distortion-corrected. Star, planet and
-  MMT-pointing overlays come from the same WCS. Latest copies go to
+  MMT-pointing overlays come from the same WCS. Hot and bad pixels are
+  replaced by their 5x5 local median using skycam_utils' nearest-date
+  bad-pixel mask, as its `load_alcor_fits` does; the FITS files stay raw.
+  Latest copies go to
   `/var/www/html/skycam/ImageLastFTP_AllSKY*.jpg`, as before.
 * **Real-time science.** Each night frame (Sun < -12 deg) is passed to
   skycam_utils in a worker process. It writes star photometry to
