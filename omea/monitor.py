@@ -531,7 +531,8 @@ class Monitor:
         self._last_extinction = time.monotonic()
         try:
             self._extinction_future = self.pool.submit(
-                science.extinction_map, str(day_dir), sci.extinction_file, sci.extinction_frames)
+                science.extinction_map, str(day_dir), sci.extinction_file, sci.extinction_frames,
+                sci.extinction_opaque_fraction, sci.extinction_opaque)
         except RuntimeError:                # the pool is shutting down
             return
         self._extinction_future.add_done_callback(
@@ -548,7 +549,9 @@ class Monitor:
             return
         target = float("nan")
         pos = self._pointing(self.clock.now())
-        if pos is not None:
+        if result["opaque"]:
+            target = result["median"]
+        elif pos is not None:
             target = alcor_extinction_at(result["path"], *pos)
         pub = {"allsky_extinction_median": result["median"],
                "allsky_extinction_target": target,

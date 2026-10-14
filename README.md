@@ -41,7 +41,7 @@ visualization.
   | `allsky_mv_tucson` | over Tucson, cone at az 0, alt 15 |
   | `allsky_mv_nogales` | over Nogales, cone at az 190, alt 15 |
   | `allsky_mv_target` | at the MMT pointing (mid-exposure; `nan` when parked) |
-  | `allsky_extinction_median` | median extinction across the sky, V mag. Undetected stars count as the most extinguished; when over half are lost, the largest measured value is published as a floor |
+  | `allsky_extinction_median` | median extinction across the sky, V mag. Undetected stars count as the most extinguished; when over half are lost, the largest measured value is published as a floor; when over 90 % are lost (fog, thick cloud) it is 10, meaning opaque (`[science] extinction_opaque_fraction`, `extinction_opaque`) |
   | `allsky_extinction_lost_fraction` | share of the map's stars not detected at all; near 1 means overcast |
   | `allsky_extinction_target` | extinction interpolated from the map at the MMT pointing; `nan` where the map has no stars nearby |
 

@@ -86,3 +86,18 @@ def test_censored_median():
     # thick cloud, as on 2026-10-09 21:00: 14 measured, 219 lost -> floor
     assert censored_median(np.linspace(-0.6, 1.7, 14), 219) == pytest.approx(1.7)
     assert math.isnan(censored_median([], 50))
+
+
+def test_fog_reports_opaque_extinction(tmp_path):
+    # thick fog: 40 stars, all lost but one spurious "detection" in every frame
+    from omea.science import extinction_map
+    for k in range(10):
+        rows = ["name,altitude,azimuth,variable,flux_g,mag_g,ext_g,sat_g"]
+        rows += [f"star{i},50,{9 * i},False,0.0,,,False" for i in range(39)]
+        rows += ["spurious,30,300,False,8194.0,-10.0,-0.87,False"]
+        (tmp_path / f"2026_10_13__20_00_{10 + 3 * k}_phot.csv").write_text("\n".join(rows) + "\n")
+    result = extinction_map(tmp_path, tmp_path / "map.fits", nframes=10)
+    assert result["opaque"] and result["path"] is None
+    assert result["median"] == 10.0
+    assert result["lost_fraction"] == pytest.approx(39 / 40)
+    assert result["tmid"].startswith("2026-10-14T03:00:")      # MST + 7 h

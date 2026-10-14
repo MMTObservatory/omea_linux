@@ -151,7 +151,8 @@ def censored_median(measured, nlost):
     return float((values[lower] + values[upper]) / 2)
 
 
-def extinction_map(day_dir, output_file, nframes=10):
+def extinction_map(day_dir, output_file, nframes=10, opaque_fraction=0.9,
+                   opaque_value=10.0):
     """
     Cloud-extinction map from the newest ``nframes`` photometry CSVs of a night:
     a running average, since a single frame's star magnitudes scatter by ~0.3
@@ -162,15 +163,34 @@ def extinction_map(day_dir, output_file, nframes=10):
     :func:`censored_median` of the map's stars, counting the undetected ones
     rather than averaging only over the clear holes the map can still see --
     and ``lost_fraction``, the share of those stars that were not detected.
+
+    When more than ``opaque_fraction`` of the stars are lost (fog, thick
+    cloud), the few still measured say nothing about the sky -- a censored
+    median would be the largest of them, even a negative one -- so the result
+    is ``opaque_value`` with ``opaque`` True and no map (``path`` None).
     """
+    import pandas as pd
     from astropy.io import fits
-    from skycam_utils.alcor import alcor_extinction_fits
+    from astropy.time import Time
+    from skycam_utils.alcor import (alcor_extinction_fits, alcor_extinction_stars,
+                                    collect_alcor_photometry)
     csvs = sorted(Path(day_dir).glob("*_phot.csv"))[-nframes:]
     if len(csvs) < nframes:
         return None
+    df = collect_alcor_photometry(csvs)
+    measured, lost = alcor_extinction_stars(df)
+    total = len(measured) + len(lost)
+    if not total:
+        return None
+    lost_fraction = len(lost) / total
+    if lost_fraction > opaque_fraction:
+        stamps = pd.to_datetime(df["OBSTIME"].unique())
+        tmid = Time(np.median(Time(stamps.to_pydatetime()).mjd), format="mjd").isot
+        return {"path": None, "tmid": tmid, "median": float(opaque_value),
+                "lost_fraction": lost_fraction, "opaque": True}
     output_file = Path(output_file)
     tmp = output_file.with_name(f".{output_file.name}.tmp.fits")
-    alcor_extinction_fits(csvs, output_file=tmp, latest=nframes, nframes=nframes,
+    alcor_extinction_fits(df, output_file=tmp, latest=nframes, nframes=nframes,
                           overwrite=True)
     with fits.open(tmp) as hdul:
         tmid = hdul[0].header.get("TMID", "")
@@ -181,4 +201,5 @@ def extinction_map(day_dir, output_file, nframes=10):
     nlost = int((~detected).sum())
     return {"path": str(output_file), "tmid": tmid,
             "median": censored_median(ext[detected], nlost),
-            "lost_fraction": nlost / len(detected) if len(detected) else float("nan")}
+            "lost_fraction": nlost / len(detected) if len(detected) else float("nan"),
+            "opaque": False}

@@ -146,8 +146,8 @@ async function refreshStatus() {
     ["Sky level", fmt(s.sky_level, 0, " ADU")],
     ["Zenith", fmt(sc.allsky_mv_zenith, 2, " mag/″²")], ["At MMT", fmt(sc.allsky_mv_target, 2, " mag/″²")],
     ["Darkest cone", fmt(sc.allsky_mv_best, 2, " mag/″²")],
-    ["Extinction, sky median", fmt(sc.allsky_extinction_median, 2, " mag")],
-    ["Extinction at MMT", fmt(sc.allsky_extinction_target, 2, " mag")],
+    ["Extinction, sky median", sc.allsky_extinction_median >= 10 ? "opaque" : fmt(sc.allsky_extinction_median, 2, " mag")],
+    ["Extinction at MMT", sc.allsky_extinction_target >= 10 ? "opaque" : fmt(sc.allsky_extinction_target, 2, " mag")],
     ["Stars lost to cloud", sc.allsky_extinction_lost_fraction == null ? "–" : `${(100 * sc.allsky_extinction_lost_fraction).toFixed(0)} %`], ["Stars detected", sc.ndetected ?? "–"],
   ]);
   const b = s.board || {};
@@ -182,7 +182,7 @@ function niceTicks(lo, hi, n) {
   const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
   return out;
 }
-function lineChart(host, { title, unit, series, invert = false, log = false, digits = 2 }) {
+function lineChart(host, { title, unit, series, invert = false, log = false, digits = 2, fmt = null }) {
   const card = document.createElement("div"); card.className = "card chart";
   card.innerHTML = `<h2>${title}</h2>`; host.appendChild(card);
   const live = series.filter(s => s.points.length);
@@ -192,10 +192,10 @@ function lineChart(host, { title, unit, series, invert = false, log = false, dig
   // draw at the card's real pixel width (a stretched viewBox squashes the
   // text), measured once every card is in the grid: a lone first card spans
   // the whole row until the others arrive
-  drawQueue.push(() => drawChart(card, { title, unit, live, invert, log, digits }));
+  drawQueue.push(() => drawChart(card, { title, unit, live, invert, log, digits, fmt }));
 }
 const drawQueue = [];
-function drawChart(card, { title, unit, live, invert, log, digits }) {
+function drawChart(card, { title, unit, live, invert, log, digits, fmt }) {
   const probe = document.createElement("div"); card.appendChild(probe);
   const W = Math.round(probe.getBoundingClientRect().width) || 640; probe.remove();
   const H = 220, FS = 13, m = { l: 58, r: 14, t: 10, b: 30 };
@@ -234,7 +234,7 @@ function drawChart(card, { title, unit, live, invert, log, digits }) {
     const rows = live.map(s => { let best = s.points[0]; for (const p of s.points) if (Math.abs(p[0] - t) < Math.abs(best[0] - t)) best = p; return [s, best]; });
     const d = new Date(rows[0][1][0] * 1000);
     tip.innerHTML = `<b>${d.toISOString().slice(11, 19)} UT</b><br>` +
-      rows.map(([s, p]) => `<i style="background:${css(s.color)}"></i>${s.name}: ${p[1].toFixed(digits)} ${unit}`).join("<br>");
+      rows.map(([s, p]) => `<i style="background:${css(s.color)}"></i>${s.name}: ${fmt ? fmt(p[1]) : `${p[1].toFixed(digits)} ${unit}`}`).join("<br>");
     tip.style.display = "block";
     const left = ev.clientX - card.getBoundingClientRect().left;
     tip.style.left = `${Math.min(left + 12, card.clientWidth - tip.offsetWidth - 4)}px`; tip.style.top = `40px`;
@@ -256,9 +256,13 @@ async function refreshPlots() {
     { name: "Tucson dome", color: "--series-3", points: pts(F, "allsky_mv_tucson") },
     { name: "Nogales dome", color: "--series-4", points: pts(F, "allsky_mv_nogales") },
     { name: "At MMT", color: "--series-5", points: pts(F, "allsky_mv_target") } ] });
-  lineChart(host, { title: "Cloud extinction (10-frame map)", unit: "mag", series: [
+  // the server reports 10 mag ("opaque") once over 90 % of the stars are lost
+  const ext = (v) => v >= 10 ? "opaque (fog / thick cloud)" : `${v.toFixed(2)} mag`;
+  lineChart(host, { title: "Cloud extinction (10-frame map)", unit: "mag", fmt: ext, series: [
     { name: "Sky median", color: "--series-1", points: pts(h.extinction, "median") },
     { name: "At MMT", color: "--series-2", points: pts(h.extinction, "target") } ] });
+  lineChart(host, { title: "Stars lost (10-frame map)", unit: "%", digits: 0, series: [
+    { name: "Lost", color: "--series-1", points: pts(h.extinction, "lost").map(([t, v]) => [t, 100 * v]) } ] });
   lineChart(host, { title: "Exposure", unit: "s", log: true, digits: 4, series: [
     { name: "Exposure", color: "--series-1", points: pts(F, "exposure") } ] });
   lineChart(host, { title: "Temperature", unit: "°C", digits: 1, series: [

@@ -125,6 +125,10 @@ class ScienceConfig:
     extinction_frames: int = 10
     extinction_interval: float = 0.0
     extinction_file: str = "/mnt/d/skycam/alcor_extinction_latest.fits"
+    # over this share of stars lost (fog), publish extinction_opaque instead of
+    # a median of the few left
+    extinction_opaque_fraction: float = 0.9
+    extinction_opaque: float = 10.0     # mag
 
 
 @dataclass
