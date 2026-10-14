@@ -35,7 +35,11 @@ but only while that process runs). On this host:
 * `windows/omea-usbip.cmd` is in the Startup folder
   (`shell:startup`) next to the "Ubuntu" shortcut that starts WSL at log-in.
 * The "Skywatch" startup shortcut was moved to
-  `C:\Users\skycam\omea\disabled-startup\`; put it back to return to Skywatch.
+  `C:\Users\skycam\omea\disabled-startup\`; put it back (and remove
+  `omea-usbip.cmd`) to return to Skywatch.
+* The script stops Skywatch if it is running. Windows reopens apps left open
+  at shutdown unless "Automatically save my restartable apps" (Settings >
+  Accounts > Sign-in options) is turned off.
 
 To install on another host, copy `omea-usbip.ps1` (with CRLF line endings) to
 `%USERPROFILE%\omea\` and `omea-usbip.cmd` to `shell:startup`.
@@ -46,10 +50,11 @@ In WSL:
 lsusb                                        # 03c3:294f ZWO, 0403:6015 FTDI
 sudo usermod -aG dialout $USER               # /dev/ttyUSB0
 # the ASI SDK needs a usbfs buffer larger than one 23 MB frame (default 16 MB);
-# without it every exposure fails
-echo 'w /sys/module/usbcore/parameters/usbfs_memory_mb - - - - 256' | \
-    sudo tee /etc/tmpfiles.d/usbfs.conf
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/usbfs.conf
+# without it every exposure fails. usbcore is a module that WSL loads only at
+# the first usbipd attach, so set it as a module option (a tmpfiles.d rule
+# runs too early at boot)
+echo 'options usbcore usbfs_memory_mb=256' | sudo tee /etc/modprobe.d/usbfs.conf
+echo 256 | sudo tee /sys/module/usbcore/parameters/usbfs_memory_mb   # now
 loginctl enable-linger $USER                 # run the user service from WSL boot
 ```
 

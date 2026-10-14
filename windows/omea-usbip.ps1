@@ -25,6 +25,14 @@ for ($i = 0; $i -lt 60; $i++) {
 }
 Log "WSL up after $($i * 5) s"
 
+# Skywatch holds both devices and makes every attach fail as "Device busy".
+# Windows reopens it at log-in if it was open at shutdown ("restartable apps").
+$sky = Get-Process Skywatch -ErrorAction SilentlyContinue
+if ($sky) {
+    Stop-Process -InputObject $sky -Force
+    Log "stopped Skywatch (pid $($sky.Id)) to free the devices"
+}
+
 foreach ($id in $devices) {
     # one long-lived process per device; --auto-attach re-attaches after a drop
     Start-Process -FilePath $usbipd -WindowStyle Hidden `
