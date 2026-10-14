@@ -47,9 +47,12 @@ visualization.
 
   The pointing comes from the mount's redis keys, as in skycam-utils'
   `mmt_extinction_redis.py`, which this replaces.
-* **Sensors.** Polls the RS232 board every 30 s and publishes the same
-  `allsky_*_temp` and `allsky_*_rh` keys `tcs_logger.py` did. It also appends the Skywatch-format
-  `DataOut_Weather.csv` that `tcs_logger.py` reads.
+* **Sensors.** Polls the RS232 board every 30 s and publishes the keys
+  skycam-utils' `tcs_logger.py` cron job did (`allsky_external_temp`,
+  `allsky_internal_temp`, `allsky_hotside_temp`, `allsky_ccd_temp`,
+  `allsky_external_rh`, `allsky_internal_rh`), which it replaces, plus
+  `allsky_dewpoint` (C) and `allsky_heater` (0/1). It also appends the
+  Skywatch-format `DataOut_Weather.csv`.
 * **Web status** at `http://<host>:8081/`: the latest image, panorama and
   keogram, camera, sky and enclosure state, the night's plots, and the log.
   Read-only.
