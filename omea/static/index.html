@@ -110,6 +110,11 @@ function showTab() {
   refresh();
 }
 window.addEventListener("hashchange", showTab);
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if ((location.hash || "#sky") === "#plots") refreshPlots(); }, 250);
+});
 
 const fmt = (v, d = 1, unit = "") => (v === null || v === undefined || Number.isNaN(v)) ? "–" : `${Number(v).toFixed(d)}${unit}`;
 function exposureText(e) { return e >= 1 ? `${e.toFixed(1)} s` : `${(e * 1000).toFixed(2)} ms`; }
@@ -183,7 +188,10 @@ function lineChart(host, { title, unit, series, invert = false, log = false, dig
   if (!live.length) { card.insertAdjacentHTML("beforeend", `<div class="empty">No data yet</div>`); return; }
   if (series.length > 1) card.insertAdjacentHTML("beforeend",
     `<div class="legend">${series.map(s => `<span><i style="background:${css(s.color)}"></i>${s.name}</span>`).join("")}</div>`);
-  const W = 640, H = 220, m = { l: 52, r: 12, t: 8, b: 26 };
+  // draw at the card's real pixel width: a stretched viewBox squashes the text
+  const probe = document.createElement("div"); card.appendChild(probe);
+  const W = Math.round(probe.getBoundingClientRect().width) || 640; probe.remove();
+  const H = 220, FS = 13, m = { l: 58, r: 14, t: 10, b: 30 };
   const ts = live.flatMap(s => s.points.map(p => p[0])), vs = live.flatMap(s => s.points.map(p => p[1]));
   const t0 = Math.min(...ts), t1 = Math.max(...ts) || t0 + 1;
   const tf = log ? (v) => Math.log10(v) : (v) => v;
@@ -193,23 +201,24 @@ function lineChart(host, { title, unit, series, invert = false, log = false, dig
   let g = "";
   const yt = log ? niceTicks(lo, hi, 4).map(v => 10 ** v) : niceTicks(lo, hi, 5);
   for (const v of yt) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${css("--grid")}"/>` +
-    `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="${css("--text-muted")}">${log ? (v >= 1 ? v.toFixed(0) : v.toPrecision(1)) : +v.toFixed(3)}</text>`;
-  // time ticks: the smallest round step (1 min .. 6 h) giving at most 7 labels
+    `<text x="${m.l - 6}" y="${y(v) + 5}" text-anchor="end" font-size="${FS}" fill="${css("--text-secondary")}">${log ? (v >= 1 ? v.toFixed(0) : v.toPrecision(1)) : +v.toFixed(3)}</text>`;
+  // time ticks: the smallest round step (1 min .. 6 h) leaving ~60 px per label
+  const maxTicks = Math.max(2, Math.min(7, Math.floor((W - m.l - m.r) / 60)));
   const step = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360].map(mm => mm * 60)
-    .find(st => (t1 - t0) / st <= 7) || 21600;
+    .find(st => (t1 - t0) / st <= maxTicks) || 21600;
   for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) {
     const d = new Date(t * 1000), lab = `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
-    g += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="${css("--text-muted")}">${lab}</text>`;
+    g += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle" font-size="${FS}" fill="${css("--text-secondary")}">${lab}</text>`;
   }
-  g += `<text x="4" y="${H - 6}" font-size="11" fill="${css("--text-muted")}">UT</text>`;
-  g += `<text x="4" y="${m.t + 8}" font-size="11" fill="${css("--text-muted")}">${unit}</text>`;
+  g += `<text x="4" y="${H - 6}" font-size="${FS}" fill="${css("--text-secondary")}">UT</text>`;
+  g += `<text x="4" y="${m.t + 10}" font-size="${FS}" fill="${css("--text-secondary")}">${unit}</text>`;
   for (const s of live) {
     let d = "", prev = null;
     for (const [t, v] of s.points) { d += (prev !== null && t - prev > 900 ? "M" : (d ? "L" : "M")) + `${x(t).toFixed(1)},${y(v).toFixed(1)}`; prev = t; }
     g += `<path d="${d}" fill="none" stroke="${css(s.color)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
   }
   g += `<line id="xh" y1="${m.t}" y2="${H - m.b}" stroke="${css("--text-muted")}" stroke-dasharray="3 3" visibility="hidden"/>`;
-  card.insertAdjacentHTML("beforeend", `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${title}">${g}</svg><div class="tip"></div>`);
+  card.insertAdjacentHTML("beforeend", `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${title}">${g}</svg><div class="tip"></div>`);
   const svg = card.querySelector("svg"), tip = card.querySelector(".tip"), xh = svg.querySelector("#xh");
   svg.addEventListener("mousemove", (ev) => {
     const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width * W;
