@@ -374,14 +374,11 @@ class Monitor:
 
         proj = self._projector_for(when)
         rgb = render.display_rgb(cube)
-        tel = None
-        pos = outputs.read_telescope(out.telescope_file) if out.telescope_file else None
-        if pos is not None:
-            from astropy.coordinates import SkyCoord
-            import astropy.units as u
-            az, alt = render._altaz(SkyCoord(pos[0] * u.deg, pos[1] * u.deg), when,
-                                    self.site.location)
-            tel = (float(az), float(alt), pos[2])
+        # the same pointing the science uses: the mount's redis keys, else the
+        # telescope file; the zenith when parked, no marker when unknown
+        tel = self._pointing(when, parked=(0.0, 90.0))
+        if tel is not None:
+            tel = (*tel, True)
         info = dict(meta, time=when, local=local, exposure=frame.exposure, gain=frame.gain)
         allsky = render.render_allsky(proj, rgb, info, self.site.location, tel)
         unwrap = render.render_unwrap(proj, rgb)
@@ -436,10 +433,10 @@ class Monitor:
                 self.redis.publish(dict.fromkeys(SCIENCE_KEYS, float("nan")))
             self._record(row, day_dir)
 
-    def _pointing(self, when):
-        """The MMT's (az, alt) at ``when``, or None when it is parked or unknown."""
+    def _pointing(self, when, parked=None):
+        """The MMT's (az, alt) at ``when``; ``parked`` when parked, None when unknown."""
         return pointing.mmt_altaz(when, self.site.location, self.redis.client,
-                                  self.cfg.output.telescope_file)
+                                  self.cfg.output.telescope_file, parked=parked)
 
     def _science_done(self, fut, row, day_dir):
         try:

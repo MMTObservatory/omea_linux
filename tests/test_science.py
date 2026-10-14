@@ -64,6 +64,7 @@ def test_pointing_from_mount_keys():
     assert alt > 89.0
     client.store["mount_mini_cat_ra2000"] = json.dumps({"value": -1})
     assert pointing.mmt_altaz(when, site.location, client) is None    # parked
+    assert pointing.mmt_altaz(when, site.location, client, parked=(0.0, 90.0)) == (0.0, 90.0)
     assert pointing.mmt_altaz(when, site.location, FakeRedis({})) is None
 
 

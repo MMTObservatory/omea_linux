@@ -28,12 +28,16 @@ def _value(client, key):
     return json.loads(raw)["value"]
 
 
-def mmt_altaz(when, location, redis_client=None, telescope_file=None):
-    """``(az, alt)`` in degrees at ``when``, or None when there is no target."""
+def mmt_altaz(when, location, redis_client=None, telescope_file=None, parked=None):
+    """
+    ``(az, alt)`` in degrees at ``when``, or None when there is no target.
+    A parked mount returns ``parked`` (the image overlay passes the zenith,
+    where the parked MMT points, as mmt_position.py did).
+    """
     if redis_client is not None:
         try:
             if float(_value(redis_client, "mount_mini_cat_ra2000")) < 0:
-                return None
+                return parked
             coord = SkyCoord(ra=Angle(_value(redis_client, "mount_mini_ra"), u.hourangle),
                              dec=Angle(_value(redis_client, "mount_mini_declination"), u.deg))
         except Exception as err:                              # noqa: BLE001
