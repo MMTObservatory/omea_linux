@@ -82,7 +82,7 @@ bytes. Commands (from `envi/Main.pas`):
 | Code | Command | Arguments / reply |
 |---|---|---|
 | 9C | version | reply: major, minor, camera type |
-| 9D | get data | reply bytes 0-1 T ext, 2-3 RH ext, 4-5 T int, 6 heater on, 7 auto, 8 power %, 13-14 RH int, 15-16 T heater ring |
+| 9D | get data | reply bytes 0-1 T ext, 2-3 RH ext, 4-5 T int, 6 heater on, 7 auto, 8 power setting % (same when off), 13-14 RH int, 15-16 T heater ring |
 | 9E | set config | T threshold (2), RH threshold (2), auto (1), power (1); reply CA |
 | 9F | get config | T threshold (2), RH threshold (2) |
 | A0 | heater on/off | 1 byte |

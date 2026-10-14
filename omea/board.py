@@ -109,7 +109,7 @@ class BoardData:
     temp_hot: float                 # degC, dome heating ring
     heater_on: bool
     auto_heat: bool
-    heater_power: int               # %
+    heater_power: int               # %, the stored setting (also reported when off)
     dew_point: float
 
     def as_dict(self):

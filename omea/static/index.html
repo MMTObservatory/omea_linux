@@ -157,7 +157,7 @@ async function refreshStatus() {
     ["Inside", `${fmt(b.temp_int, 1, " °C")} · ${fmt(b.rh_int, 0, " %")}`],
     ["Heater ring", fmt(b.temp_hot, 1, " °C")],
     ["Dome heater", b.heater_on === undefined ? "–" : (b.heater_on ? "ON" : "off") + (b.auto_heat ? " (auto)" : " (manual)")],
-    ["Heater power", b.heater_power === undefined ? "–" : `${b.heater_power} %`],
+    ["Heater power setting", b.heater_power === undefined ? "–" : `${b.heater_power} %`],
   ]);
 }
 
