@@ -91,6 +91,12 @@ class BoardConfig:
     rh_offset: float = 0.1515
     temp_ext_gain: float = 1.0
     temp_ext_offset: float = 0.0
+    # dome heater, written to the board at start-up (it keeps running on them
+    # without any software): "auto" heats below heater_temp and above heater_rh
+    heater_mode: str = "auto"       # "auto", "on" or "off"
+    heater_temp: float = 10.0       # degC, outside temperature
+    heater_rh: float = 80.0         # %, outside humidity
+    heater_power: int = 50          # %
 
 
 @dataclass

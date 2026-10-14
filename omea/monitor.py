@@ -222,8 +222,32 @@ class Monitor:
                     self.status.update(focus=cfg.mode.focus_position)
                 except Exception as err:                       # noqa: BLE001
                     log.error("lens initialisation failed: %s", err)
+                try:
+                    self._configure_heater()
+                except Exception as err:                       # noqa: BLE001
+                    log.error("dome heater set-up failed: %s", err)
         self.camera = open_camera(cfg.camera, cfg.image, tz=self.site.tz, clock=self.clock)
         self.status.update(camera=self.camera.name)
+
+    def _configure_heater(self):
+        """Store the configured heater settings in the board, if they differ."""
+        b = self.cfg.board
+        if b.heater_mode not in ("auto", "on", "off"):
+            raise ValueError(f"heater_mode must be auto, on or off, not {b.heater_mode!r}")
+        auto = b.heater_mode == "auto"
+        temp, rh = self.board.get_config()
+        data = self.board.read()
+        # thresholds come back through the ADC conversion: compare loosely
+        same = (abs(temp - b.heater_temp) < 0.5 and abs(rh - b.heater_rh) < 1.0
+                and data.auto_heat == auto and data.heater_power == b.heater_power)
+        if not same:
+            self.board.set_config(b.heater_temp, b.heater_rh, auto, b.heater_power)
+            log.info("dome heater: %s, below %.1f C and above %.0f %% RH, power %d %% "
+                     "(was %s, %.1f C, %.0f %%, %d %%)", b.heater_mode, b.heater_temp,
+                     b.heater_rh, b.heater_power, "auto" if data.auto_heat else "manual",
+                     temp, rh, data.heater_power)
+        if not auto:
+            self.board.set_heater(b.heater_mode == "on")
 
     def _set_iris(self, fratio):
         """Drive the iris; returns the f-ratio now in front of the sensor."""

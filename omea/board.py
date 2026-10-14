@@ -261,6 +261,8 @@ class SimBoard:
         self.focus = None
         self.heater = False
         self.thresholds = (7.0, 90.0)
+        self.auto = True
+        self.power = 40
 
     def close(self):
         pass
@@ -272,10 +274,11 @@ class SimBoard:
         t = time.time()
         temp = 12 + 6 * math.sin(t / 43200 * math.pi)
         rh = 45 + 20 * math.cos(t / 43200 * math.pi)
-        heater = temp < self.thresholds[0] and rh > self.thresholds[1]
+        heater = (temp < self.thresholds[0] and rh > self.thresholds[1]) if self.auto \
+            else self.heater
         return BoardData(time=t, temp_ext=temp, rh_ext=rh, temp_int=temp + 5,
                          rh_int=15.0, temp_hot=temp + (8 if heater else 1),
-                         heater_on=heater, auto_heat=True, heater_power=50,
+                         heater_on=heater, auto_heat=self.auto, heater_power=self.power,
                          dew_point=dew_point(temp, rh))
 
     def get_config(self):
@@ -283,6 +286,7 @@ class SimBoard:
 
     def set_config(self, temp_threshold, rh_threshold, auto, power):
         self.thresholds = (temp_threshold, rh_threshold)
+        self.auto, self.power = bool(auto), int(power)
 
     def set_heater(self, on):
         self.heater = bool(on)

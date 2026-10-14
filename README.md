@@ -83,7 +83,8 @@ omea -c config.toml run               # the real thing
 omea run --simulate --archive /mnt/d/skycam/2026-10-09 --start 2026-10-10T01:20 --speed 30
 
 # hardware utilities: they need the board/camera, so stop the service first
-# (systemctl --user stop omea); thresholds and power are kept by the board
+# (systemctl --user stop omea). The service writes the [board] heater_* settings
+# at start-up, so make lasting heater changes in the config file
 omea iris 2.8
 omea focus 1320
 omea heater --temp 7 --rh 90 --power 50       # automatic mode, thresholds

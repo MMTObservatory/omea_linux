@@ -90,3 +90,24 @@ def test_focus_is_signed_big_endian():
 def test_dew_point():
     assert board.dew_point(20.0, 100.0) == pytest.approx(20.0, abs=0.01)
     assert board.dew_point(20.0, 50.0) == pytest.approx(9.3, abs=0.5)
+
+
+def test_heater_settings_written_only_when_changed():
+    from omea.config import Config
+    from omea.monitor import Monitor
+    cfg = Config()
+    cfg.board.driver = "sim"
+    mon = Monitor(cfg, publish=False)
+    mon.board = board.open_board(cfg.board)
+    calls = []
+    real = mon.board.set_config
+    mon.board.set_config = lambda *a: (calls.append(a), real(*a))
+    mon._configure_heater()
+    assert calls == [(10.0, 80.0, True, 50)]
+    data = mon.board.read()
+    assert data.auto_heat and data.heater_power == 50
+    mon._configure_heater()                 # already set: no second write
+    assert len(calls) == 1
+    cfg.board.heater_mode = "on"
+    mon._configure_heater()
+    assert calls[-1][2] is False and mon.board.read().heater_on

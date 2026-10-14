@@ -46,6 +46,12 @@ driver = "zwo"
 [board]
 port = "/dev/ttyUSB0"              # the FTDI RS232 adapter (Windows COM3)
 # poll_interval = 30.0
+# dome heater, written to the board at start-up; `omea heater` changes last
+# only until the service restarts
+# heater_mode = "auto"              # "auto", "on" or "off"
+# heater_temp = 10.0                # auto: heat below this outside temperature (C)
+# heater_rh = 80.0                  # ...and above this outside humidity (%)
+# heater_power = 50                 # %
 
 [output]
 data_dir = "/mnt/d/skycam"
