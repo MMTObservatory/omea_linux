@@ -117,6 +117,9 @@ window.addEventListener("resize", () => {
 });
 
 const fmt = (v, d = 1, unit = "") => (v === null || v === undefined || Number.isNaN(v)) ? "–" : `${Number(v).toFixed(d)}${unit}`;
+// extinction: the server reports 10 mag ("opaque") once over 90 % of the stars
+// are lost; anything below zero is within the calibration noise of a clear sky
+const extText = (v, opaque = "opaque") => v >= 10 ? opaque : v < 0 ? "clear" : fmt(v, 2, " mag");
 function exposureText(e) { return e >= 1 ? `${e.toFixed(1)} s` : `${(e * 1000).toFixed(2)} ms`; }
 function kv(el, rows) { el.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join(""); }
 // server clock minus browser clock, so ages are right on a skewed client
@@ -146,8 +149,8 @@ async function refreshStatus() {
     ["Sky level", fmt(s.sky_level, 0, " ADU")],
     ["Zenith", fmt(sc.allsky_mv_zenith, 2, " mag/″²")], ["At MMT", fmt(sc.allsky_mv_target, 2, " mag/″²")],
     ["Darkest cone", fmt(sc.allsky_mv_best, 2, " mag/″²")],
-    ["Extinction, sky median", sc.allsky_extinction_median >= 10 ? "opaque" : fmt(sc.allsky_extinction_median, 2, " mag")],
-    ["Extinction at MMT", sc.allsky_extinction_target >= 10 ? "opaque" : fmt(sc.allsky_extinction_target, 2, " mag")],
+    ["Extinction, sky median", extText(sc.allsky_extinction_median)],
+    ["Extinction at MMT", extText(sc.allsky_extinction_target)],
     ["Stars lost to cloud", sc.allsky_extinction_lost_fraction == null ? "–" : `${(100 * sc.allsky_extinction_lost_fraction).toFixed(0)} %`], ["Stars detected", sc.ndetected ?? "–"],
   ]);
   const b = s.board || {};
@@ -256,8 +259,7 @@ async function refreshPlots() {
     { name: "Tucson dome", color: "--series-3", points: pts(F, "allsky_mv_tucson") },
     { name: "Nogales dome", color: "--series-4", points: pts(F, "allsky_mv_nogales") },
     { name: "At MMT", color: "--series-5", points: pts(F, "allsky_mv_target") } ] });
-  // the server reports 10 mag ("opaque") once over 90 % of the stars are lost
-  const ext = (v) => v >= 10 ? "opaque (fog / thick cloud)" : `${v.toFixed(2)} mag`;
+  const ext = (v) => extText(v, "opaque (fog / thick cloud)");
   lineChart(host, { title: "Cloud extinction (10-frame map)", unit: "mag", fmt: ext, series: [
     { name: "Sky median", color: "--series-1", points: pts(h.extinction, "median") },
     { name: "At MMT", color: "--series-2", points: pts(h.extinction, "target") } ] });
