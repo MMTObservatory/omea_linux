@@ -192,11 +192,15 @@ def extinction_map(day_dir, output_file, nframes=10, opaque_fraction=0.9,
     tmp = output_file.with_name(f".{output_file.name}.tmp.fits")
     alcor_extinction_fits(df, output_file=tmp, latest=nframes, nframes=nframes,
                           overwrite=True)
-    with fits.open(tmp) as hdul:
+    # no memmap: a mapping that outlives the ``with`` keeps the file open, and
+    # on drvfs (/mnt/d) renaming over an open file leaves a broken ``?????????``
+    # entry that nothing on the Linux side can open again
+    with fits.open(tmp, memmap=False) as hdul:
         tmid = hdul[0].header.get("TMID", "")
         stars = hdul["STARS"].data
-        detected = np.asarray(stars["detected"], dtype=bool)
-        ext = np.asarray(stars["ext"], dtype=float)
+        detected = np.array(stars["detected"], dtype=bool)
+        ext = np.array(stars["ext"], dtype=float)
+        del stars
     tmp.replace(output_file)
     nlost = int((~detected).sum())
     return {"path": str(output_file), "tmid": tmid,

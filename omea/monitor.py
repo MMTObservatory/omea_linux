@@ -539,6 +539,7 @@ class Monitor:
             lambda f: self._extinction_done(f, day_dir))
 
     def _extinction_done(self, fut, day_dir):
+        from astropy.io import fits
         from skycam_utils.alcor import alcor_extinction_at
         try:
             result = fut.result()
@@ -552,7 +553,11 @@ class Monitor:
         if result["opaque"]:
             target = result["median"]
         elif pos is not None:
-            target = alcor_extinction_at(result["path"], *pos)
+            try:
+                with fits.open(result["path"], memmap=False) as hdul:   # see extinction_map
+                    target = alcor_extinction_at(hdul, *pos)
+            except Exception as err:                           # noqa: BLE001
+                log.warning("extinction lookup at the MMT failed: %s", err)
         pub = {"allsky_extinction_median": result["median"],
                "allsky_extinction_target": target,
                "allsky_extinction_lost_fraction": result["lost_fraction"]}
