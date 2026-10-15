@@ -89,6 +89,12 @@ def append_csv(path, fields, row):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     new = not path.exists()
+    if not new:
+        # a file begun by an older version keeps its columns until the next day
+        with open(path, newline="") as f:
+            header = f.readline().strip()
+        if header and header.split(",") != list(fields):
+            fields = header.split(",")
     with open(path, "a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         if new:

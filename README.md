@@ -47,6 +47,8 @@ visualization.
   | `allsky_extinction_median` | median extinction across the sky, V mag. Undetected stars count as the most extinguished; when over half are lost, the largest measured value is published as a floor; when over 90 % are lost (fog, thick cloud) it is 10, meaning opaque (`[science] extinction_opaque_fraction`, `extinction_opaque`) |
   | `allsky_extinction_lost_fraction` | share of the map's stars not detected at all; near 1 means overcast |
   | `allsky_extinction_target` | extinction interpolated from the map at the MMT pointing; `nan` where the map has no stars nearby |
+  | `allsky_fog_index` | per-frame extinction near the zenith (alt > 55) minus low down (20-35), median of 3 frames, mag. About 0 on a clear sky; condensation on the dome starts at its top, so it rises first there |
+  | `allsky_dome_fog` | 1 when the fog index is above 0.2 mag (until it drops below 0.1) with outside humidity above 50 %: the extinction values then measure the dome, not the sky. It also turns the dome heater on |
 
   The pointing comes from the mount's redis keys, as in skycam-utils'
   `mmt_extinction_redis.py`, which this replaces.

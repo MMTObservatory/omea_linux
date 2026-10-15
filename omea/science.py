@@ -63,11 +63,45 @@ def _geometry(wcs, shape, time):
     return _GEOMETRY[key]
 
 
+# dome-fog index: condensation starts at the top of the dome, farthest from
+# the heater ring, and clears from the rim up, while cloud rarely sits at the
+# zenith with a clean sky low down. Extinction near the zenith minus that low
+# down measures it.
+FOG_HIGH = (55.0, 90.0)     # deg altitude
+FOG_LOW = (20.0, 35.0)
+FOG_MIN_STARS = 5
+
+
+def _band_extinction(phot, band):
+    """Censored median G extinction of the stars in an altitude ``band``."""
+    sel = (phot["altitude"] >= band[0]) & (phot["altitude"] < band[1])
+    if "variable" in phot:
+        sel &= ~phot["variable"].astype(bool)
+    stars = phot.loc[sel]
+    detected = np.isfinite(stars["mag_g"].to_numpy(float))
+    ext = stars["ext_g"].to_numpy(float)
+    measured = ext[np.isfinite(ext)]
+    if not detected.sum():
+        return float("nan")
+    # only some detected stars are calibrated: count lost stars in proportion
+    nlost = round((~detected).sum() * len(measured) / detected.sum())
+    if len(measured) + nlost < FOG_MIN_STARS:
+        return float("nan")
+    return censored_median(measured, nlost)
+
+
+def fog_index(phot):
+    """Extinction near the zenith minus low down (mag); NaN without enough stars."""
+    if not len(phot) or "ext_g" not in phot or "mag_g" not in phot:
+        return float("nan")
+    return _band_extinction(phot, FOG_HIGH) - _band_extinction(phot, FOG_LOW)
+
+
 def _extinction_summary(phot):
     """Median G-band extinction and star counts from one frame's photometry."""
     from skycam_utils.alcor.config import ALCOR_EXT_MAG_WINDOW, ALCOR_EXT_MIN_ALTITUDE
     out = {"nstars": int(len(phot)), "ndetected": 0, "ext_g": float("nan"),
-           "ext_g_all": float("nan")}
+           "ext_g_all": float("nan"), "fog_index": float("nan")}
     if not len(phot) or "mag_g" not in phot:
         return out
     out["ndetected"] = int(np.isfinite(phot["mag_g"]).sum())
@@ -85,6 +119,7 @@ def _extinction_summary(phot):
         sel &= ~phot["variable"].astype(bool)
     if sel.sum() >= 5:
         out["ext_g"] = float(np.median(phot.loc[sel, "ext_g"]))
+    out["fog_index"] = fog_index(phot)
     return out
 
 

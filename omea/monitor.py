@@ -44,14 +44,15 @@ log = logging.getLogger(__name__)
 # "nan" when there is no measurement
 SCIENCE_KEYS = ("allsky_mv_zenith", "allsky_mv_tucson", "allsky_mv_nogales",
                 "allsky_mv_target", "allsky_extinction_median",
-                "allsky_extinction_target", "allsky_extinction_lost_fraction")
+                "allsky_extinction_target", "allsky_extinction_lost_fraction",
+                "allsky_fog_index", "allsky_dome_fog")
 
 LIVE_FIELDS = ["time", "file", "exposure", "gain", "fratio", "sun_alt", "moon_alt",
                "sky_level", "ccd_temp", "cooler_power", "allsky_mv_zenith",
                "allsky_mv_tucson", "allsky_mv_nogales", "allsky_mv_target",
                "target_az", "target_alt", "allsky_mv_best", "best_az", "best_alt",
-               "nstars", "ndetected", "ext_g", "ext_g_all"]
-EXTINCTION_FIELDS = ["time", "median", "target", "lost"]
+               "nstars", "ndetected", "ext_g", "ext_g_all", "fog_index"]
+EXTINCTION_FIELDS = ["time", "median", "target", "lost", "fog"]
 KEOGRAM_FILE = "omea_keogram.npz"       # the day's strip so far, kept across restarts
 
 
@@ -134,6 +135,8 @@ class Monitor:
         self._projector_epoch = None
         self.keogram = render.Keogram()
         self.dew = DewGuard(cfg.board)
+        self._fog_recent = deque(maxlen=max(1, cfg.science.fog_frames))
+        self.dome_fog = False
         self.pool = None
         self._threads = []
         self._live_lock = threading.Lock()
@@ -544,6 +547,8 @@ class Monitor:
                 # daylight: blank the night-only values so nothing stale lingers
                 self._science_live = False
                 self.redis.publish(dict.fromkeys(SCIENCE_KEYS, float("nan")))
+                self._fog_recent.clear()
+                self.dome_fog = False
             self._record(row, day_dir)
 
     def _pointing(self, when, parked=None):
@@ -562,12 +567,33 @@ class Monitor:
         if result:
             pub = {k: result[k] for k in ("allsky_mv_zenith", "allsky_mv_tucson",
                                           "allsky_mv_nogales", "allsky_mv_target")}
+            if "fog_index" in result:
+                pub.update(self._update_fog(result["fog_index"]))
             self.redis.publish(pub)
             with self.status.lock:
                 self.status.science.update(pub, allsky_mv_best=result["allsky_mv_best"],
                                            ndetected=result.get("ndetected"),
                                            sb_time=row["time"])
             self._maybe_extinction(day_dir)
+
+    def _update_fog(self, index):
+        """Track the dome-fog flag from one frame's fog index; the redis values."""
+        sci = self.cfg.science
+        if math.isfinite(index):
+            self._fog_recent.append(index)
+        smooth = float(np.median(self._fog_recent)) if self._fog_recent else float("nan")
+        rh = (self.status.board or {}).get("rh_ext", math.nan)
+        humid = not math.isfinite(rh) or rh >= sci.fog_rh
+        full = len(self._fog_recent) == self._fog_recent.maxlen
+        if not self.dome_fog and full and smooth >= sci.fog_on and humid:
+            self.dome_fog = True
+            log.warning("dome fog: extinction %.2f mag higher near the zenith than low down "
+                        "(outside %.0f %% RH)", smooth, rh)
+        elif self.dome_fog and smooth < sci.fog_off:
+            self.dome_fog = False
+            log.info("dome fog cleared (index %.2f mag)", smooth)
+        # with every star near the zenith lost the index is NaN: keep the flag
+        return {"allsky_fog_index": smooth, "allsky_dome_fog": int(self.dome_fog)}
 
     def _maybe_extinction(self, day_dir):
         sci = self.cfg.science
@@ -615,7 +641,8 @@ class Monitor:
                "allsky_extinction_lost_fraction": result["lost_fraction"]}
         self.redis.publish(pub)
         row = {"time": result["tmid"] + "Z" if result["tmid"] else self.clock.now().isoformat(),
-               "median": result["median"], "target": target, "lost": result["lost_fraction"]}
+               "median": result["median"], "target": target, "lost": result["lost_fraction"],
+               "fog": int(self.dome_fog)}
         with self.status.lock:
             self.status.science.update(pub, extinction_time=result["tmid"])
             self.status.extinction.append(row)
@@ -656,7 +683,7 @@ class Monitor:
                     if cfg.board.heater_mode == "dew":
                         with self.status.lock:
                             rows = list(self.status.weather)
-                        switch = self.dew.update(data, rows)
+                        switch = self.dew.update(data, rows, fog=self.dome_fog)
                         if switch is not None:
                             self._force_heater(switch, self.dew.reason)
                     local = self.site.local(self.clock.now())

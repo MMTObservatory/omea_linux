@@ -10,7 +10,8 @@ radiates below the air temperature (the unheated ring reads 1-2 C under it).
 * the unheated heater ring (a proxy for the dome) is within ``dew_margin`` of
   the dew point, or
 * the humidity has risen faster than ``dew_rise`` per hour over the last hour
-  and is above ``dew_rise_rh``,
+  and is above ``dew_rise_rh``, or
+* the camera sees fog on the dome (``fog``, from the monitor's fog index),
 
 and stopping once the humidity is ``dew_hysteresis`` below ``dew_rh``, is no
 longer rising and the heater has run for at least ``dew_hold`` seconds.
@@ -52,9 +53,11 @@ class DewGuard:
         self.since = -math.inf              # time of the last switch
         self.reason = ""
 
-    def _reasons(self, data, trend):
+    def _reasons(self, data, trend, fog):
         c = self.cfg
         why = []
+        if fog:
+            why.append("fog on the dome")
         if data.rh_ext >= c.dew_rh:
             why.append(f"humidity {data.rh_ext:.0f} % >= {c.dew_rh:.0f} %")
         # the ring only stands for the dome while it is not being heated
@@ -65,14 +68,15 @@ class DewGuard:
             why.append(f"humidity {data.rh_ext:.0f} % rising {trend:.0f} %/h")
         return why
 
-    def update(self, data, rows):
+    def update(self, data, rows, fog=False):
         """
         Feed one reading (:class:`omea.board.BoardData`) and the recent history
-        ``rows``; returns True/False when the heater should switch, else None.
+        ``rows`` (and whether the camera sees dome fog); returns True/False
+        when the heater should switch, else None.
         """
         c = self.cfg
         trend = rh_trend(rows, data.time)
-        why = self._reasons(data, trend)
+        why = self._reasons(data, trend, fog)
         if not self.on:
             if why:
                 self.on, self.since, self.reason = True, data.time, "; ".join(why)

@@ -73,3 +73,48 @@ def test_monitor_forces_heater_and_restores_auto():
     assert not mon.board.auto and mon.board.read().heater_on
     mon._force_heater(False, "test")
     assert mon.board.auto and mon.board.thresholds == (10.0, 80.0)
+
+
+def _phot(high_ext, low_ext, high_lost=0):
+    import numpy as np
+    import pandas as pd
+    rows = []
+    for i in range(20):
+        rows.append({"altitude": 70.0, "mag_g": np.nan if i < high_lost else -10.0,
+                     "ext_g": np.nan if i < high_lost else high_ext + 0.01 * (i % 3)})
+        rows.append({"altitude": 25.0, "mag_g": -10.0, "ext_g": low_ext})
+        rows.append({"altitude": 45.0, "mag_g": -10.0, "ext_g": 5.0})     # ignored band
+    return pd.DataFrame(rows)
+
+
+def test_fog_index():
+    from omea.science import fog_index
+    assert abs(fog_index(_phot(0.0, 0.0))) < 0.02
+    assert abs(fog_index(_phot(1.5, 0.1)) - 1.4) < 0.02
+    # most zenith stars lost: the censored median floors at the worst measured
+    assert fog_index(_phot(2.0, 0.0, high_lost=15)) >= 2.0
+
+
+def test_dome_fog_flag_hysteresis_and_heater():
+    import math
+    from omea.config import Config
+    from omea.monitor import Monitor
+    cfg = Config()
+    mon = Monitor(cfg, publish=False)
+    mon.status.board = {"rh_ext": 78.0}
+    flags = [mon._update_fog(v)["allsky_dome_fog"]
+             for v in (0.0, 0.5, 0.0, 0.6, 0.7, math.nan, 0.15, 0.05, 0.05)]
+    assert flags == [0, 0, 0, 1, 1, 1, 1, 1, 0]     # median of 3, on 0.2 / off 0.1
+    mon.status.board = {"rh_ext": 30.0}            # dry: zenith cloud, not dome fog
+    assert [mon._update_fog(1.0)["allsky_dome_fog"] for _ in range(3)] == [0, 0, 0]
+    guard = DewGuard(BoardConfig())
+    assert guard.update(reading(0.0, 8.0, 30.0), [], fog=True) is True
+    assert guard.reason == "fog on the dome"
+
+
+def test_csv_keeps_an_older_header(tmp_path):
+    from omea import outputs
+    path = tmp_path / "x.csv"
+    outputs.append_csv(path, ["a", "b"], {"a": 1, "b": 2})
+    outputs.append_csv(path, ["a", "b", "c"], {"a": 3, "b": 4, "c": 5})
+    assert path.read_text().splitlines() == ["a,b", "1,2", "3,4"]
