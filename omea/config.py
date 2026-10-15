@@ -34,6 +34,8 @@ class CameraConfig:
     cooling_sun_altitude: float = 0.0    # cool only while the Sun is below this
     cooling_ramp: float = 2.0            # degC per minute towards the set point
     max_cooler_power: float = 95.0       # % before the set point is backed off
+    cooler_off_power: float = 2.0        # % at which the daytime warm-up switches off
+    warm_temperature: float = 25.0       # degC set point at which the warm-up stops regardless
     # simulator: a directory of Skywatch frames to replay (``omea run
     # --simulate``; time compression is ``--speed``)
     sim_archive: str = ""

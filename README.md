@@ -108,7 +108,10 @@ systemctl --user enable --now omea
 journalctl --user -u omea -f
 ```
 
-A clean stop switches the sensor cooler off. The dome heater is autonomous and
+The cooler set point ramps at `cooling_ramp` (2 C/min) both ways: after sunrise
+it warms at that rate and switches off once the cooler is idle.
+The keogram so far is kept in the day directory (`omea_keogram.npz`) and picked
+up after a restart. The dome heater is autonomous and
 keeps working without the software.
 
 ## Changes from Skywatch

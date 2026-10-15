@@ -51,6 +51,7 @@ LIVE_FIELDS = ["time", "file", "exposure", "gain", "fratio", "sun_alt", "moon_al
                "target_az", "target_alt", "allsky_mv_best", "best_az", "best_alt",
                "nstars", "ndetected", "ext_g", "ext_g_all"]
 EXTINCTION_FIELDS = ["time", "median", "target", "lost"]
+KEOGRAM_FILE = "omea_keogram.npz"       # the day's strip so far, kept across restarts
 
 
 @dataclass
@@ -135,11 +136,13 @@ class Monitor:
         self._threads = []
         self._live_lock = threading.Lock()
         self._last_latest = 0.0
+        self._last_keogram_save = time.monotonic()
         self._last_extinction = 0.0
         self._extinction_future = None
         self._science_live = False
         self._cooler_setpoint = None
         self._cooler_hot_since = None
+        self._cooler_warming = False
         self._count = 0
         logging.getLogger("omea").addHandler(StatusLogHandler(self.status))
 
@@ -164,6 +167,7 @@ class Monitor:
             self.queue.put(None)
             for t in self._threads:
                 t.join(timeout=60)
+            self._save_keogram()
             if self.pool is not None:
                 self.pool.shutdown(wait=True, cancel_futures=False)
             if self.camera is not None:
@@ -188,6 +192,11 @@ class Monitor:
             self.status.extinction.extend(extinction)
             self.status.weather.extend(weather)
         self._seed_exposure(frames, now)
+        if self.keogram.load(day_dir / KEOGRAM_FILE, day):
+            keo = self.keogram.image()
+            with self.status.lock:
+                self.status.images["keogram"] = _jpeg_bytes(keo, 90)
+            log.info("keogram picked up from %s", day_dir / KEOGRAM_FILE)
         if frames or extinction or weather:
             log.info("loaded %d frames, %d extinction maps and %d sensor readings since %s",
                      len(frames), len(extinction), len(weather), noon.isoformat(timespec="minutes"))
@@ -288,33 +297,51 @@ class Monitor:
         want = sun_alt < c.cooling_sun_altitude
         temp = cam.temperature()
         power = cam.cooler_power()
-        if not want:
-            if self._cooler_setpoint is not None:
-                log.info("cooling off (Sun at %.1f deg)", sun_alt)
-                cam.set_cooler(False)
-                self._cooler_setpoint = None
-            self.status.update(ccd_temp=temp, cooler_power=power, cooler_target=float("nan"))
-            return
+        now = time.monotonic()
         if self._cooler_setpoint is None:
+            if not want:
+                self.status.update(ccd_temp=temp, cooler_power=power,
+                                   cooler_target=float("nan"))
+                return
             log.info("cooling on, ramping %.1f -> %.1f degC", temp, c.target_temperature)
             self._cooler_setpoint = temp
-            self._cooler_last = time.monotonic()
-        # ramp the set point gently, as Skywatch does, to spare the Peltier
-        now = time.monotonic()
+            self._cooler_last = now
+        # ramp the set point gently both ways, as Skywatch does, to spare the Peltier
         step = c.cooling_ramp * (now - self._cooler_last) / 60.0 * self.clock.speed
         self._cooler_last = now
-        target = max(self._cooler_setpoint - step, c.target_temperature)
-        # back off when the cooler cannot hold the set point
-        if math.isfinite(power) and power >= c.max_cooler_power:
-            self._cooler_hot_since = self._cooler_hot_since or now
-            if now - self._cooler_hot_since > 300 / self.clock.speed:
-                target = self._cooler_setpoint + 1.0
-                self._cooler_hot_since = now
-                log.warning("cooler at %.0f%% power; set point raised to %.1f degC",
-                            power, target)
+        if not want:
+            # warm up at the same rate; switch off once the cooler is idle
+            if not self._cooler_warming:
+                log.info("cooling off: warming at %.1f degC/min (Sun at %.1f deg)",
+                         c.cooling_ramp, sun_alt)
+                self._cooler_hot_since = None
+            self._cooler_warming = True
+            target = self._cooler_setpoint + step
+            if (math.isfinite(power) and power <= c.cooler_off_power) or target >= c.warm_temperature:
+                log.info("cooler off at %.1f degC (power %.0f%%)", temp, power)
+                cam.set_cooler(False)
+                self._cooler_setpoint = None
+                self._cooler_warming = False
+                self.status.update(ccd_temp=temp, cooler_power=power,
+                                   cooler_target=float("nan"))
+                return
         else:
-            self._cooler_hot_since = None
-        if target != self._cooler_setpoint or not cam_cooling(cam):
+            if self._cooler_warming:
+                log.info("cooling on again, ramping %.1f -> %.1f degC",
+                         self._cooler_setpoint, c.target_temperature)
+            self._cooler_warming = False
+            target = max(self._cooler_setpoint - step, c.target_temperature)
+            # back off when the cooler cannot hold the set point
+            if math.isfinite(power) and power >= c.max_cooler_power:
+                self._cooler_hot_since = self._cooler_hot_since or now
+                if now - self._cooler_hot_since > 300 / self.clock.speed:
+                    target = self._cooler_setpoint + 1.0
+                    self._cooler_hot_since = now
+                    log.warning("cooler at %.0f%% power; set point raised to %.1f degC",
+                                power, target)
+            else:
+                self._cooler_hot_since = None
+        if round(target) != round(self._cooler_setpoint) or not cam_cooling(cam):
             cam.set_cooler(True, target)
         self._cooler_setpoint = target
         self.status.update(ccd_temp=temp, cooler_power=power, cooler_target=target)
@@ -446,7 +473,12 @@ class Monitor:
         noon = local.replace(hour=12, minute=0, second=0, microsecond=0)
         if local.hour < 12:
             noon -= timedelta(days=1)
+        keo_file = day_dir / KEOGRAM_FILE
+        if day != self.keogram.day and self.keogram.load(keo_file, day):
+            log.info("keogram picked up from %s", keo_file)
         self.keogram.add(day, (local - noon).total_seconds(), rgb, proj.zcol)
+        if time.monotonic() - self._last_keogram_save >= 300 / self.clock.speed:
+            self._save_keogram()
 
         q = out.jpeg_quality
         allsky_jpg = _jpeg_bytes(allsky, q)
@@ -570,6 +602,15 @@ class Monitor:
         outputs.append_csv(day_dir / "omea_extinction.csv", EXTINCTION_FIELDS, row)
         log.debug("extinction map %s: median %.3f, target %.3f, %.0f%% of stars lost",
                   result["tmid"], result["median"], target, 100 * result["lost_fraction"])
+
+    def _save_keogram(self):
+        self._last_keogram_save = time.monotonic()
+        if self.keogram.day is None:
+            return
+        try:
+            self.keogram.save(Path(self.cfg.output.data_dir) / self.keogram.day / KEOGRAM_FILE)
+        except OSError as err:
+            log.warning("saving the keogram: %s", err)
 
     def _record(self, row, day_dir):
         with self._live_lock:

@@ -61,3 +61,35 @@ def test_meter_mask():
     m = meter_mask((1411, 1422), 696, 698, 596)
     assert m[698, 696] and not m[0, 0]
     assert abs(m.sum() - np.pi * 596 ** 2) / m.sum() < 0.01
+
+
+def _keogram_batch(times, columns, width):
+    """The original all-at-once keogram, as the reference for the painted strip."""
+    strip = np.zeros((columns[0].shape[0], width, 3), np.uint8)
+    x = (np.arange(width) + 0.5) * 86400.0 / width
+    idx = np.searchsorted(times, x, side="right") - 1
+    live = (idx >= 0) & (x <= times[-1] + 86400.0 / width)
+    strip[:, live] = np.stack(columns, axis=1)[:, idx[live]]
+    return strip
+
+
+def test_keogram_paints_like_batch_and_survives_restart(tmp_path):
+    from omea.render import Keogram
+    rng = np.random.default_rng(3)
+    width = 288                                           # 300 s columns
+    times = np.sort(rng.uniform(3600, 50000, 120))
+    times[10:13] = times[10] + np.array([0, 20, 40])     # several frames in one column
+    times[50] += 4000                                    # and a gap
+    times = np.sort(times)
+    frames = [rng.integers(0, 255, (16, 5, 3), dtype=np.uint8) for _ in times]
+    columns = [f[::-1, 2, :] for f in frames]
+    keo = Keogram(height=16, width=width)
+    for k, (t, f) in enumerate(zip(times, frames)):
+        keo.add("2026-10-14", t, f, 2)
+        if k == 60:                                       # restart half-way
+            keo.save(tmp_path / "k.npz")
+            keo = Keogram(height=16, width=width)
+            assert not keo.load(tmp_path / "k.npz", "2026-10-15")      # another day
+            assert keo.load(tmp_path / "k.npz", "2026-10-14")
+    want = _keogram_batch(times, columns, width)
+    assert np.array_equal(np.asarray(keo.image()), want)

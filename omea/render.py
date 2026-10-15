@@ -11,9 +11,11 @@ which also removes the lens distortion and axis tilt from the picture.
 """
 
 import logging
+import math
 import warnings
 from functools import lru_cache
 from importlib.resources import files
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -287,32 +289,68 @@ class Keogram:
     The day so far as a strip: the zenith column of every frame, placed on a
     fixed noon-to-noon time axis (``width`` columns for 24 h), each column
     repeated until the next frame -- Skywatch's "24h overview".
+
+    The strip is painted as frames arrive, and :meth:`save` / :meth:`load`
+    keep it across a restart.
     """
 
     def __init__(self, height=1411, width=2880):
         self.height = height
         self.width = width
-        self.day = None
-        self.times = []          # seconds since local noon
-        self.columns = []
+        self._reset(None)
+
+    def _reset(self, day):
+        self.day = day
+        self.strip = None
+        self.last_col = None
+        self.filled = 0          # columns painted so far
 
     def add(self, day, seconds_since_noon, rgb, zcol):
         if day != self.day:
-            self.day, self.times, self.columns = day, [], []
-        self.times.append(float(seconds_since_noon))
-        self.columns.append(rgb[::-1, zcol, :].copy())     # north at the top
+            self._reset(day)
+        col = rgb[::-1, zcol, :]                             # north at the top
+        if self.strip is None:
+            self.strip = np.zeros((col.shape[0], self.width, 3), np.uint8)
+        dt = 86400.0 / self.width
+        # column i (centre (i + 0.5) dt) shows the newest frame at or before it,
+        # out to one column past the newest frame -- not into the future
+        start = max(int(math.ceil(seconds_since_noon / dt - 0.5)), 0)
+        end = min(int(math.floor(seconds_since_noon / dt + 0.5)), self.width - 1)
+        if self.last_col is not None and start > self.filled:
+            self.strip[:, self.filled:start] = self.last_col[:, None]
+        if end >= start:
+            self.strip[:, start:end + 1] = col[:, None]
+            self.filled = end + 1
+        self.last_col = col.copy()
 
     def image(self):
-        if not self.columns:
+        if self.strip is None:
             return None
-        strip = np.zeros((self.columns[0].shape[0], self.width, 3), np.uint8)
-        x = (np.arange(self.width) + 0.5) * 86400.0 / self.width
-        idx = np.searchsorted(self.times, x, side="right") - 1
-        # fill from the first frame to the newest one, not into the future
-        live = (idx >= 0) & (x <= self.times[-1] + 86400.0 / self.width)
-        cols = np.stack(self.columns, axis=1)
-        strip[:, live] = cols[:, idx[live]]
-        img = Image.fromarray(strip)
+        img = Image.fromarray(self.strip)
         if img.height != self.height:
             img = img.resize((self.width, self.height), Image.NEAREST)
         return img
+
+    def save(self, path):
+        if self.strip is None:
+            return
+        path = Path(path)
+        tmp = path.with_name(f".{path.name}.tmp")
+        with open(tmp, "wb") as f:
+            np.savez(f, strip=self.strip, last_col=self.last_col,
+                     day=self.day, filled=self.filled)
+        tmp.replace(path)
+
+    def load(self, path, day):
+        """Pick up ``day``'s strip from ``path``; False if there is none."""
+        try:
+            with np.load(path) as z:
+                if str(z["day"]) != day or z["strip"].shape[1] != self.width:
+                    return False
+                self._reset(day)
+                self.strip = z["strip"].copy()
+                self.last_col = z["last_col"].copy()
+                self.filled = int(z["filled"])
+        except (OSError, KeyError, ValueError):
+            return False
+        return True

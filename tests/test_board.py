@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 
 from omea import board
 from omea.config import BoardConfig
@@ -111,3 +112,40 @@ def test_heater_settings_written_only_when_changed():
     cfg.board.heater_mode = "on"
     mon._configure_heater()
     assert calls[-1][2] is False and mon.board.read().heater_on
+
+
+def test_cooler_ramps_down_and_up_gently():
+    from omea.camera import SimCamera
+    from omea.config import Config
+    from omea.monitor import Monitor
+    cfg = Config()
+    mon = Monitor(cfg, publish=False)
+    cam = mon.camera = SimCamera(cfg.camera, cfg.image)
+    cam._temp = 20.0
+    t = [0.0]
+    import omea.monitor as m
+    real = m.time.monotonic
+    m.time.monotonic = lambda: t[0]
+    try:
+        targets = []
+        for _ in range(30):                              # night, one minute apart
+            mon._manage_cooling(-20)
+            targets.append(mon._cooler_setpoint)
+            t[0] += 60
+        steps = np.diff(targets)
+        assert steps.min() >= -cfg.camera.cooling_ramp - 1e-9
+        assert targets[-1] == cfg.camera.target_temperature
+        # sunrise: warms at the ramp rate, then switches off when idle
+        warm = []
+        cam.cooler_power = lambda: 0.0 if mon._cooler_setpoint and mon._cooler_setpoint > 10 else 40.0
+        for _ in range(30):
+            mon._manage_cooling(+5)
+            warm.append(mon._cooler_setpoint)
+            t[0] += 60
+            if mon._cooler_setpoint is None:
+                break
+        ramp = [w for w in warm if w is not None]
+        assert np.diff(ramp).max() <= cfg.camera.cooling_ramp + 1e-9
+        assert len(ramp) > 5 and warm[-1] is None and not cam._cooling
+    finally:
+        m.time.monotonic = real
