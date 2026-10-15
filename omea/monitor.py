@@ -35,6 +35,7 @@ from .clock import Clock
 from .ephem import Site
 from .exposure import ExposureController
 from .fitsout import build_header, write_fits_bz2
+from .heater import DewGuard
 from .imaging import raw_to_cube
 
 log = logging.getLogger(__name__)
@@ -132,6 +133,7 @@ class Monitor:
         self.projector = None
         self._projector_epoch = None
         self.keogram = render.Keogram()
+        self.dew = DewGuard(cfg.board)
         self.pool = None
         self._threads = []
         self._live_lock = threading.Lock()
@@ -173,6 +175,8 @@ class Monitor:
             if self.camera is not None:
                 self.camera.close()
             if self.board is not None:
+                if self.dew.on:
+                    self._force_heater(False, "stopping")
                 self.board.close()
             self.status.update(state="stopped")
 
@@ -258,9 +262,9 @@ class Monitor:
     def _configure_heater(self):
         """Store the configured heater settings in the board, if they differ."""
         b = self.cfg.board
-        if b.heater_mode not in ("auto", "on", "off"):
-            raise ValueError(f"heater_mode must be auto, on or off, not {b.heater_mode!r}")
-        auto = b.heater_mode == "auto"
+        if b.heater_mode not in ("dew", "auto", "on", "off"):
+            raise ValueError(f"heater_mode must be dew, auto, on or off, not {b.heater_mode!r}")
+        auto = b.heater_mode in ("dew", "auto")
         temp, rh = self.board.get_config()
         data = self.board.read()
         # thresholds come back through the ADC conversion: compare loosely
@@ -274,6 +278,22 @@ class Monitor:
                      temp, rh, data.heater_power)
         if not auto:
             self.board.set_heater(b.heater_mode == "on")
+
+    def _force_heater(self, on, reason):
+        """dew mode: force the heater on, or hand it back to the board's automatic mode."""
+        b = self.cfg.board
+        try:
+            self.board.set_config(b.heater_temp, b.heater_rh, not on, b.heater_power)
+            if on:
+                self.board.set_heater(True)
+        except Exception as err:                               # noqa: BLE001
+            log.warning("dome heater switch failed: %s", err)
+            self.dew.on = not on                # try again at the next reading
+            return
+        if on:
+            log.info("dome heater on: %s", reason)
+        else:
+            log.info("dome heater back to automatic: %s", reason)
 
     def _set_iris(self, fratio):
         """Drive the iris; returns the f-ratio now in front of the sensor."""
@@ -633,6 +653,12 @@ class Monitor:
                         "heater_on": data.heater_on, "auto_heat": data.auto_heat,
                         "heater_power": data.heater_power, "time": data.time})
                     self.status.weather.append(dict(self.status.board, ccd_temp=ccd))
+                    if cfg.board.heater_mode == "dew":
+                        with self.status.lock:
+                            rows = list(self.status.weather)
+                        switch = self.dew.update(data, rows)
+                        if switch is not None:
+                            self._force_heater(switch, self.dew.reason)
                     local = self.site.local(self.clock.now())
                     if cfg.output.weather_csv:
                         outputs.append_weather(cfg.output.weather_csv,

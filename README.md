@@ -111,8 +111,11 @@ journalctl --user -u omea -f
 The cooler set point ramps at `cooling_ramp` (2 C/min) both ways: after sunrise
 it warms at that rate and switches off once the cooler is idle.
 The keogram so far is kept in the day directory (`omea_keogram.npz`) and picked
-up after a restart. The dome heater is autonomous and
-keeps working without the software.
+up after a restart. The dome heater runs in `dew` mode: the
+board's automatic thresholds stay as a backstop that works without the
+software, and the service switches the heater on early, when the humidity is
+above 60 %, rising more than 10 %/h, or the unheated heater ring is within 4 C
+of the dew point (see `omea/heater.py`; the log says why it switched).
 
 ## Changes from Skywatch
 

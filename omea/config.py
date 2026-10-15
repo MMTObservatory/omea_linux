@@ -94,11 +94,19 @@ class BoardConfig:
     temp_ext_gain: float = 1.0
     temp_ext_offset: float = 0.0
     # dome heater, written to the board at start-up (it keeps running on them
-    # without any software): "auto" heats below heater_temp and above heater_rh
-    heater_mode: str = "auto"       # "auto", "on" or "off"
+    # without any software): "auto" heats below heater_temp and above heater_rh;
+    # "dew" leaves that as a backstop and heats earlier from the dew_* rules
+    # (omea.heater), forcing the heater on while the service runs
+    heater_mode: str = "dew"        # "dew", "auto", "on" or "off"
     heater_temp: float = 10.0       # degC, outside temperature
     heater_rh: float = 80.0         # %, outside humidity
     heater_power: int = 50          # %
+    dew_rh: float = 60.0            # %, heat above this outside humidity
+    dew_margin: float = 4.0         # degC, ...or with the unheated ring this near the dew point
+    dew_rise: float = 10.0          # %/h, ...or with the humidity rising this fast
+    dew_rise_rh: float = 40.0       # %, ...from this humidity up
+    dew_hysteresis: float = 10.0    # %, stop below dew_rh minus this
+    dew_hold: float = 1800.0        # s, shortest heating spell
 
 
 @dataclass
