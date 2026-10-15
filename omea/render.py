@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 SIZE = (1422, 1411)                 # Skywatch's JPEG size (w, h)
 BRIGHT_STARS = 1.6                  # label stars at least this bright (V)
+ALIASES = {"Algebar"}               # alternate names in star_names.csv (Rigel)
 PLANETS = ("mercury", "venus", "mars", "jupiter", "saturn")
 
 
@@ -50,19 +51,23 @@ def _font(size):
 
 @lru_cache(maxsize=1)
 def _named_stars():
-    """(name, ra, dec, V) of the bright named stars shipped with skycam_utils."""
+    """
+    (name, ra, dec, V) of the bright named stars shipped with skycam_utils, one
+    label per star: the list gives some stars twice under alternate names.
+    """
     import csv
     path = files("skycam_utils") / "data" / "star_names.csv"
-    out = []
+    out = {}
     with path.open() as f:
         for row in csv.DictReader(f):
             try:
                 mag = float(row["Magnitude"])
             except ValueError:
                 continue
-            if mag <= BRIGHT_STARS:
-                out.append((row["Star Name"], float(row["RA"]), float(row["Dec"]), mag))
-    return out
+            if mag <= BRIGHT_STARS and row["Star Name"] not in ALIASES:
+                out.setdefault(row["HD"] or row["Star Name"],
+                               (row["Star Name"], float(row["RA"]), float(row["Dec"]), mag))
+    return list(out.values())
 
 
 class Projector:

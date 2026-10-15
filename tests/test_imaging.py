@@ -93,3 +93,11 @@ def test_keogram_paints_like_batch_and_survives_restart(tmp_path):
             assert keo.load(tmp_path / "k.npz", "2026-10-14")
     want = _keogram_batch(times, columns, width)
     assert np.array_equal(np.asarray(keo.image()), want)
+
+
+def test_one_label_per_bright_star():
+    from omea.render import _named_stars
+    stars = _named_stars()
+    names = [s[0] for s in stars]
+    assert "Rigel" in names and "Algebar" not in names
+    assert len({(round(s[1], 3), round(s[2], 3)) for s in stars}) == len(stars)
