@@ -12,11 +12,17 @@ they are imported only here, so an API change there breaks one module.
 """
 
 import logging
+import warnings
 from pathlib import Path
 
 import numpy as np
 
 log = logging.getLogger(__name__)
+
+# skycam_utils' extinction map keys a geometry cache on wcs.to_header_string(),
+# which drops the SIP terms with this warning on every map. Harmless (the
+# frames' SIP is fixed); filtered here, in every worker that imports this.
+warnings.filterwarnings("ignore", message="Some non-standard WCS keywords were excluded")
 
 _GEOMETRY = {}          # per-process: WCS key -> _Geometry
 
