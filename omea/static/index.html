@@ -188,9 +188,10 @@ function niceTicks(lo, hi, n) {
   const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
   return out;
 }
-function lineChart(host, { title, unit, series, invert = false, log = false, digits = 2, fmt = null }) {
+function lineChart(host, { title, unit, series, invert = false, log = false, digits = 2, fmt = null, from = null }) {
   const card = document.createElement("div"); card.className = "card chart";
   card.innerHTML = `<h2>${title}</h2>`; host.appendChild(card);
+  if (from !== null) series = series.map(s => ({ ...s, points: s.points.filter(p => p[0] >= from) }));
   const live = series.filter(s => s.points.length);
   if (!live.length) { card.insertAdjacentHTML("beforeend", `<div class="empty">No data yet</div>`); return; }
   if (series.length > 1) card.insertAdjacentHTML("beforeend",
@@ -198,15 +199,15 @@ function lineChart(host, { title, unit, series, invert = false, log = false, dig
   // draw at the card's real pixel width (a stretched viewBox squashes the
   // text), measured once every card is in the grid: a lone first card spans
   // the whole row until the others arrive
-  drawQueue.push(() => drawChart(card, { title, unit, live, invert, log, digits, fmt }));
+  drawQueue.push(() => drawChart(card, { title, unit, live, invert, log, digits, fmt, from }));
 }
 const drawQueue = [];
-function drawChart(card, { title, unit, live, invert, log, digits, fmt }) {
+function drawChart(card, { title, unit, live, invert, log, digits, fmt, from }) {
   const probe = document.createElement("div"); card.appendChild(probe);
   const W = Math.round(probe.getBoundingClientRect().width) || 640; probe.remove();
   const H = 220, FS = 13, m = { l: 58, r: 14, t: 10, b: 30 };
   const ts = live.flatMap(s => s.points.map(p => p[0])), vs = live.flatMap(s => s.points.map(p => p[1]));
-  const t0 = Math.min(...ts), t1 = Math.max(...ts) || t0 + 1;
+  const t0 = from ?? Math.min(...ts), t1 = Math.max(...ts, t0 + 1);
   const tf = log ? (v) => Math.log10(v) : (v) => v;
   let lo = Math.min(...vs.map(tf)), hi = Math.max(...vs.map(tf)); const pad = (hi - lo) * 0.06 || 0.5; lo -= pad; hi += pad;
   const x = (t) => m.l + (t - t0) / Math.max(t1 - t0, 1) * (W - m.l - m.r);
@@ -256,19 +257,21 @@ async function refreshPlots() {
     .map(r => [typeof r[tkey] === "number" ? r[tkey] : Date.parse(r[tkey]) / 1000, r[key]])
     .filter(p => p[1] !== null && p[1] !== undefined && Number.isFinite(+p[1])).map(p => [p[0], +p[1]]);
   const F = h.frames, Wt = h.weather;
-  lineChart(host, { title: "Sky brightness", unit: "mag/″²", invert: true, series: [
+  // the night measures start afresh at 00:00 UT (17:00 MST), before each sunset
+  const night = Math.floor(serverNow() / 86400) * 86400;
+  lineChart(host, { title: "Sky brightness", unit: "mag/″²", invert: true, from: night, series: [
     { name: "Zenith", color: "--series-1", points: pts(F, "allsky_mv_zenith") },
     { name: "Darkest cone", color: "--series-2", points: pts(F, "allsky_mv_best") },
     { name: "Tucson dome", color: "--series-3", points: pts(F, "allsky_mv_tucson") },
     { name: "Nogales dome", color: "--series-4", points: pts(F, "allsky_mv_nogales") },
     { name: "At MMT", color: "--series-5", points: pts(F, "allsky_mv_target") } ] });
   const ext = (v) => extText(v, "opaque (fog / thick cloud)");
-  lineChart(host, { title: "Cloud extinction (10-frame map)", unit: "mag", fmt: ext, series: [
+  lineChart(host, { title: "Cloud extinction (10-frame map)", unit: "mag", fmt: ext, from: night, series: [
     { name: "Sky median", color: "--series-1", points: pts(h.extinction, "median") },
     { name: "At MMT", color: "--series-2", points: pts(h.extinction, "target") } ] });
-  lineChart(host, { title: "Stars lost (10-frame map)", unit: "%", digits: 0, series: [
+  lineChart(host, { title: "Stars lost (10-frame map)", unit: "%", digits: 0, from: night, series: [
     { name: "Lost", color: "--series-1", points: pts(h.extinction, "lost").map(([t, v]) => [t, 100 * v]) } ] });
-  lineChart(host, { title: "Dome fog index (zenith minus low extinction)", unit: "mag", digits: 2, series: [
+  lineChart(host, { title: "Dome fog index (zenith minus low extinction)", unit: "mag", digits: 2, from: night, series: [
     { name: "Fog index", color: "--series-1", points: pts(F, "fog_index") } ] });
   lineChart(host, { title: "Exposure", unit: "s", log: true, digits: 4, series: [
     { name: "Exposure", color: "--series-1", points: pts(F, "exposure") } ] });

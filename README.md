@@ -60,6 +60,8 @@ visualization.
   Skywatch-format `DataOut_Weather.csv`.
 * **Web status** at `http://<host>:8081/`: the latest image, panorama and
   keogram, camera, sky and enclosure state, the night's plots, and the log.
+  The sky brightness, extinction, stars-lost and fog-index plots start afresh
+  at 00:00 UT (17:00 MST), before each sunset.
   Read-only.
 
 ## Install

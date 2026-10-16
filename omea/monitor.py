@@ -23,7 +23,7 @@ import time
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -80,7 +80,7 @@ class Status:
     last_frame_time: float = 0.0
     board: dict = field(default_factory=dict)
     science: dict = field(default_factory=dict)
-    history: deque = field(default_factory=lambda: deque(maxlen=4000))
+    history: deque = field(default_factory=lambda: deque(maxlen=6000))
     weather: deque = field(default_factory=lambda: deque(maxlen=3000))
     extinction: deque = field(default_factory=lambda: deque(maxlen=2000))
     log: deque = field(default_factory=lambda: deque(maxlen=200))
@@ -109,6 +109,19 @@ class StatusLogHandler(logging.Handler):
 
     def emit(self, record):
         self.status.log.append(self.format(record))
+
+
+def _since(rows, since):
+    """The CSV ``rows`` whose ISO ``time`` is at or after ``since`` (naive = UT)."""
+    out = []
+    for r in rows:
+        try:
+            t = datetime.fromisoformat(r["time"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (t if t.tzinfo else t.replace(tzinfo=timezone.utc)) >= since:
+            out.append(r)
+    return out
 
 
 def _jpeg_bytes(img, quality):
@@ -189,9 +202,17 @@ class Monitor:
         day = self.site.day_dir(now)
         day_dir = Path(self.cfg.output.data_dir) / day
         noon = datetime.strptime(day, "%Y-%m-%d").replace(hour=12, tzinfo=self.site.tz)
-        frames = outputs.read_csv(day_dir / "omea_live.csv")
-        extinction = outputs.read_csv(day_dir / "omea_extinction.csv")
-        weather = (outputs.read_weather(self.cfg.output.weather_csv, noon.timestamp(),
+        # the night plots run from 00:00 UT, which (west of Greenwich) can be in
+        # yesterday's directory: start from whichever of the two is earlier
+        since = min(noon, now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0,
+                                                                microsecond=0))
+        frames, extinction = [], []
+        for d in sorted({self.site.day_dir(since), day}):
+            frames += _since(outputs.read_csv(Path(self.cfg.output.data_dir) / d
+                                              / "omea_live.csv"), since)
+            extinction += _since(outputs.read_csv(Path(self.cfg.output.data_dir) / d
+                                                  / "omea_extinction.csv"), since)
+        weather = (outputs.read_weather(self.cfg.output.weather_csv, since.timestamp(),
                                         self.site.tz)
                    if self.cfg.output.weather_csv else [])
         with self.status.lock:
@@ -206,7 +227,7 @@ class Monitor:
             log.info("keogram picked up from %s", day_dir / KEOGRAM_FILE)
         if frames or extinction or weather:
             log.info("loaded %d frames, %d extinction maps and %d sensor readings since %s",
-                     len(frames), len(extinction), len(weather), noon.isoformat(timespec="minutes"))
+                     len(frames), len(extinction), len(weather), since.isoformat(timespec="minutes"))
 
     def _seed_exposure(self, frames, now, max_age=900):
         """Start the exposure from the last frame, if it is recent (a restart)."""

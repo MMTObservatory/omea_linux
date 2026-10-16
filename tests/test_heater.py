@@ -118,3 +118,13 @@ def test_csv_keeps_an_older_header(tmp_path):
     outputs.append_csv(path, ["a", "b"], {"a": 1, "b": 2})
     outputs.append_csv(path, ["a", "b", "c"], {"a": 3, "b": 4, "c": 5})
     assert path.read_text().splitlines() == ["a,b", "1,2", "3,4"]
+
+
+def test_history_rows_since_00_ut():
+    from datetime import datetime, timezone
+    from omea.monitor import _since
+    rows = [{"time": "2026-10-14T23:59:00+00:00"}, {"time": "2026-10-15T00:00:00+00:00"},
+            {"time": "2026-10-15T03:00:00.5Z"}, {"time": "2026-10-15T04:00:00"}, {"time": ""}]
+    since = datetime(2026, 10, 15, tzinfo=timezone.utc)
+    assert [r["time"][:13] for r in _since(rows, since)] == \
+        ["2026-10-15T00", "2026-10-15T03", "2026-10-15T04"]
