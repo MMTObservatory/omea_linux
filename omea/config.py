@@ -145,12 +145,16 @@ class ScienceConfig:
     # cleared below fog_off. While flagged the dew-mode heater runs. It is only
     # raised while the latest extinction map has lost at most fog_lost_max of
     # its stars: passing cloud loses stars, the onset of dome fog (2026-10-15)
-    # lost under 1 %.
+    # lost under 1 %. So that a dome fogged past that point (or fogging under
+    # cloud) still gets flagged, an index held above fog_on for fog_persist
+    # raises it whatever the stars lost: passing cloud held it up for 15 min
+    # at most on 2026-10-16/17, the fog on 2026-10-15 for over an hour.
     fog_on: float = 0.2                 # mag
     fog_off: float = 0.1                # mag
     fog_frames: int = 3
     fog_rh: float = 50.0                # %
     fog_lost_max: float = 0.05          # fraction
+    fog_persist: float = 1800.0         # s
 
 
 @dataclass

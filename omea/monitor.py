@@ -151,6 +151,7 @@ class Monitor:
         self._fog_recent = deque(maxlen=max(1, cfg.science.fog_frames))
         self.dome_fog = False
         self._lost = math.nan               # stars lost from the latest extinction map
+        self._fog_high_since = None         # when the fog index last rose above fog_on
         self.pool = None
         self._threads = []
         self._live_lock = threading.Lock()
@@ -572,6 +573,7 @@ class Monitor:
                 self._fog_recent.clear()
                 self.dome_fog = False
                 self._lost = math.nan
+                self._fog_high_since = None
             self._record(row, day_dir)
 
     def _pointing(self, when, parked=None):
@@ -599,22 +601,33 @@ class Monitor:
                                            sb_time=row["time"])
             self._maybe_extinction(day_dir)
 
-    def _update_fog(self, index):
+    def _update_fog(self, index, now=None):
         """Track the dome-fog flag from one frame's fog index; the redis values."""
         sci = self.cfg.science
+        now = self.clock.now().timestamp() if now is None else now
         if math.isfinite(index):
             self._fog_recent.append(index)
         smooth = float(np.median(self._fog_recent)) if self._fog_recent else float("nan")
         rh = (self.status.board or {}).get("rh_ext", math.nan)
         humid = not math.isfinite(rh) or rh >= sci.fog_rh
         full = len(self._fog_recent) == self._fog_recent.maxlen
-        # cloud overhead raises the index too, but it also hides stars
+        # how long the index has stayed up (NaN frames, every zenith star lost,
+        # don't interrupt it)
+        if full and smooth >= sci.fog_on:
+            if self._fog_high_since is None:
+                self._fog_high_since = now
+        elif not smooth >= sci.fog_off:
+            self._fog_high_since = None
+        held = self._fog_high_since is not None and now - self._fog_high_since >= sci.fog_persist
+        # cloud overhead raises the index too, but it also hides stars and moves
+        # on; fog stays, and in time hides stars too
         starry = self._lost <= sci.fog_lost_max
-        if not self.dome_fog and full and smooth >= sci.fog_on and humid and starry:
+        if not self.dome_fog and full and smooth >= sci.fog_on and humid and (starry or held):
             self.dome_fog = True
             log.warning("dome fog: extinction %.2f mag higher near the zenith than low down "
-                        "(outside %.0f %% RH, %.0f %% of stars lost)", smooth, rh,
-                        100 * self._lost)
+                        "(outside %.0f %% RH, %.0f %% of stars lost%s)", smooth, rh,
+                        100 * self._lost, ", for %.0f min" % ((now - self._fog_high_since) / 60)
+                        if held else "")
         elif self.dome_fog and smooth < sci.fog_off:
             self.dome_fog = False
             log.info("dome fog cleared (index %.2f mag)", smooth)

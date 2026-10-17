@@ -48,7 +48,7 @@ visualization.
   | `allsky_extinction_lost_fraction` | share of the map's stars not detected at all; near 1 means overcast |
   | `allsky_extinction_target` | extinction interpolated from the map at the MMT pointing; `nan` where the map has no stars nearby |
   | `allsky_fog_index` | per-frame extinction near the zenith (alt > 55) minus low down (20-35), median of 3 frames, mag. About 0 on a clear sky; condensation on the dome starts at its top, so it rises first there |
-  | `allsky_dome_fog` | 1 when the fog index is above 0.2 mag (until it drops below 0.1) with outside humidity above 50 % and at most 5 % of the extinction map's stars lost (cloud hides stars; dome fog at first does not): the extinction values then measure the dome, not the sky. It also turns the dome heater on |
+  | `allsky_dome_fog` | 1 when the fog index is above 0.2 mag (until it drops below 0.1) with outside humidity above 50 % and at most 5 % of the extinction map's stars lost (cloud hides stars; dome fog at first does not), or with the index held above 0.2 for 30 min whatever the stars lost (cloud moves on; fog stays): the extinction values then measure the dome, not the sky. It also turns the dome heater on |
 
   The pointing comes from the mount's redis keys, as in skycam-utils'
   `mmt_extinction_redis.py`, which this replaces.

@@ -113,6 +113,12 @@ def test_dome_fog_flag_hysteresis_and_heater():
     mon.status.board = {"rh_ext": 78.0}
     mon._lost = 0.3                                # passing cloud hides stars
     assert [mon._update_fog(1.0)["allsky_dome_fog"] for _ in range(3)] == [0, 0, 0]
+    # ...unless the index stays up: fog thick enough to hide stars still counts
+    mon._fog_recent.clear()
+    mon._fog_high_since = None
+    flags = [mon._update_fog(v, now=60.0 * i)["allsky_dome_fog"]
+             for i, v in enumerate([1.0] * 20 + [0.15] + [math.nan] * 5 + [1.0] * 10)]
+    assert flags.index(1) == 32                    # 30 min after the index reached 0.2
     guard = DewGuard(BoardConfig())
     assert guard.update(reading(0.0, 8.0, 30.0), [], fog=True) is True
     assert guard.reason == "fog on the dome"
