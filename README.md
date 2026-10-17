@@ -75,7 +75,8 @@ pytest
 The ZWO SDK library (`lib/libASICamera2.so.1.37`, from ZWO's Linux SDK in this
 directory) is found automatically. See [docs/hardware.md](docs/hardware.md) for
 attaching the camera and serial adapter to Linux (usbipd under WSL2), and the
-first-light checklist.
+first-light checklist. [docs/migration.md](docs/migration.md) is the plan for moving
+from WSL2 to native Debian.
 
 ## Use
 
