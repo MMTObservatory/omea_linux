@@ -150,6 +150,7 @@ class Monitor:
         self.dew = DewGuard(cfg.board)
         self._fog_recent = deque(maxlen=max(1, cfg.science.fog_frames))
         self.dome_fog = False
+        self._lost = math.nan               # stars lost from the latest extinction map
         self.pool = None
         self._threads = []
         self._live_lock = threading.Lock()
@@ -570,6 +571,7 @@ class Monitor:
                 self.redis.publish(dict.fromkeys(SCIENCE_KEYS, float("nan")))
                 self._fog_recent.clear()
                 self.dome_fog = False
+                self._lost = math.nan
             self._record(row, day_dir)
 
     def _pointing(self, when, parked=None):
@@ -606,10 +608,13 @@ class Monitor:
         rh = (self.status.board or {}).get("rh_ext", math.nan)
         humid = not math.isfinite(rh) or rh >= sci.fog_rh
         full = len(self._fog_recent) == self._fog_recent.maxlen
-        if not self.dome_fog and full and smooth >= sci.fog_on and humid:
+        # cloud overhead raises the index too, but it also hides stars
+        starry = self._lost <= sci.fog_lost_max
+        if not self.dome_fog and full and smooth >= sci.fog_on and humid and starry:
             self.dome_fog = True
             log.warning("dome fog: extinction %.2f mag higher near the zenith than low down "
-                        "(outside %.0f %% RH)", smooth, rh)
+                        "(outside %.0f %% RH, %.0f %% of stars lost)", smooth, rh,
+                        100 * self._lost)
         elif self.dome_fog and smooth < sci.fog_off:
             self.dome_fog = False
             log.info("dome fog cleared (index %.2f mag)", smooth)
@@ -661,6 +666,7 @@ class Monitor:
                "allsky_extinction_target": target,
                "allsky_extinction_lost_fraction": result["lost_fraction"]}
         self.redis.publish(pub)
+        self._lost = result["lost_fraction"]
         row = {"time": result["tmid"] + "Z" if result["tmid"] else self.clock.now().isoformat(),
                "median": result["median"], "target": target, "lost": result["lost_fraction"],
                "fog": int(self.dome_fog)}

@@ -142,11 +142,15 @@ class ScienceConfig:
     # dome fog: extinction near the zenith minus low down (science.fog_index),
     # median of the last fog_frames frames; flagged above fog_on (and outside
     # humidity above fog_rh, so cloud over the zenith alone doesn't count),
-    # cleared below fog_off. While flagged the dew-mode heater runs.
+    # cleared below fog_off. While flagged the dew-mode heater runs. It is only
+    # raised while the latest extinction map has lost at most fog_lost_max of
+    # its stars: passing cloud loses stars, the onset of dome fog (2026-10-15)
+    # lost under 1 %.
     fog_on: float = 0.2                 # mag
     fog_off: float = 0.1                # mag
     fog_frames: int = 3
     fog_rh: float = 50.0                # %
+    fog_lost_max: float = 0.05          # fraction
 
 
 @dataclass

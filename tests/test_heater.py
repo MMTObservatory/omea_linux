@@ -102,10 +102,16 @@ def test_dome_fog_flag_hysteresis_and_heater():
     cfg = Config()
     mon = Monitor(cfg, publish=False)
     mon.status.board = {"rh_ext": 78.0}
+    assert [mon._update_fog(1.0)["allsky_dome_fog"] for _ in range(3)] == [0, 0, 0]  # no map yet
+    mon._fog_recent.clear()
+    mon._lost = 0.01
     flags = [mon._update_fog(v)["allsky_dome_fog"]
              for v in (0.0, 0.5, 0.0, 0.6, 0.7, math.nan, 0.15, 0.05, 0.05)]
     assert flags == [0, 0, 0, 1, 1, 1, 1, 1, 0]     # median of 3, on 0.2 / off 0.1
     mon.status.board = {"rh_ext": 30.0}            # dry: zenith cloud, not dome fog
+    assert [mon._update_fog(1.0)["allsky_dome_fog"] for _ in range(3)] == [0, 0, 0]
+    mon.status.board = {"rh_ext": 78.0}
+    mon._lost = 0.3                                # passing cloud hides stars
     assert [mon._update_fog(1.0)["allsky_dome_fog"] for _ in range(3)] == [0, 0, 0]
     guard = DewGuard(BoardConfig())
     assert guard.update(reading(0.0, 8.0, 30.0), [], fog=True) is True
