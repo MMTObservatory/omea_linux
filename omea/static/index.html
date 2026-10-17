@@ -271,8 +271,6 @@ async function refreshPlots() {
     { name: "At MMT", color: "--series-2", points: pts(h.extinction, "target") } ] });
   lineChart(host, { title: "Stars lost (10-frame map)", unit: "%", digits: 0, from: night, series: [
     { name: "Lost", color: "--series-1", points: pts(h.extinction, "lost").map(([t, v]) => [t, 100 * v]) } ] });
-  lineChart(host, { title: "Dome fog index (zenith minus low extinction)", unit: "mag", digits: 2, from: night, series: [
-    { name: "Fog index", color: "--series-1", points: pts(F, "fog_index") } ] });
   lineChart(host, { title: "Exposure", unit: "s", log: true, digits: 4, series: [
     { name: "Exposure", color: "--series-1", points: pts(F, "exposure") } ] });
   lineChart(host, { title: "Temperature", unit: "°C", digits: 1, series: [
