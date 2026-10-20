@@ -726,6 +726,8 @@ class Monitor:
                         switch = self.dew.update(data, rows, fog=self.dome_fog)
                         if switch is not None:
                             self._force_heater(switch, self.dew.reason)
+                        elif self.dew.dropped(data):
+                            self._force_heater(True, f"the board had dropped it ({self.dew.reason})")
                     local = self.site.local(self.clock.now())
                     if cfg.output.weather_csv:
                         outputs.append_weather(cfg.output.weather_csv,

@@ -61,6 +61,14 @@ def test_dry_steady_night_stays_off():
         assert guard.update(reading(r["time"], 8.0, 30.0), rows) is None
 
 
+def test_dropped_heater_is_forced_again_once_the_ring_cools():
+    guard = DewGuard(BoardConfig())
+    assert guard.update(reading(0.0, 8.0, 99.0), []) is True
+    assert not guard.dropped(reading(30.0, 8.0, 99.0, hot=20.0, heater=True))
+    assert not guard.dropped(reading(60.0, 8.0, 99.0, hot=35.2))   # firmware cut-out
+    assert guard.dropped(reading(90.0, 8.0, 99.0, hot=12.0))
+
+
 def test_monitor_forces_heater_and_restores_auto():
     from omea.config import Config
     from omea.monitor import Monitor

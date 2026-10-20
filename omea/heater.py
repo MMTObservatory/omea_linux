@@ -15,6 +15,10 @@ radiates below the air temperature (the unheated ring reads 1-2 C under it).
 
 and stopping once the humidity is ``dew_hysteresis`` below ``dew_rh``, is no
 longer rising and the heater has run for at least ``dew_hold`` seconds.
+
+The board's firmware drops a forced heater for good once the ring reaches
+about 35 C (every sunny afternoon, 10-15 to 10-18), so the guard asks for it to
+be forced on again once the ring has cooled below ``RING_RESUME``.
 """
 
 import math
@@ -22,6 +26,7 @@ import math
 TREND_WINDOW = 3600.0       # s
 TREND_MIN_SPAN = 1800.0     # s of readings needed before trusting a trend
 TREND_MIN_POINTS = 10
+RING_RESUME = 30.0          # C, re-force a dropped heater once the ring is below this
 
 
 def rh_trend(rows, now, window=TREND_WINDOW):
@@ -67,6 +72,10 @@ class DewGuard:
         if trend is not None and trend >= c.dew_rise and data.rh_ext >= c.dew_rise_rh:
             why.append(f"humidity {data.rh_ext:.0f} % rising {trend:.0f} %/h")
         return why
+
+    def dropped(self, data):
+        """True when the heater should be on but the board has turned it off."""
+        return self.on and not data.heater_on and data.temp_hot < RING_RESUME
 
     def update(self, data, rows, fog=False):
         """
