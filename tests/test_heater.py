@@ -67,6 +67,11 @@ def test_dropped_heater_is_forced_again_once_the_ring_cools():
     assert not guard.dropped(reading(30.0, 8.0, 99.0, hot=20.0, heater=True))
     assert not guard.dropped(reading(60.0, 8.0, 99.0, hot=35.2))   # firmware cut-out
     assert guard.dropped(reading(90.0, 8.0, 99.0, hot=12.0))
+    # the reason logged on re-forcing is the current humidity, not the switch-on one
+    assert guard.update(reading(120.0, 8.0, 76.0, hot=12.0), []) is None
+    assert guard.reason == "outside humidity 76 % >= 60 %"
+    assert guard.update(reading(150.0, 8.0, 55.0, hot=12.0), []) is None
+    assert guard.reason == "held on, outside humidity 55 %"
 
 
 def test_monitor_forces_heater_and_restores_auto():

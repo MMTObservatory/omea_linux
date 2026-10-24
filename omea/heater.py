@@ -64,13 +64,13 @@ class DewGuard:
         if fog:
             why.append("fog on the dome")
         if data.rh_ext >= c.dew_rh:
-            why.append(f"humidity {data.rh_ext:.0f} % >= {c.dew_rh:.0f} %")
+            why.append(f"outside humidity {data.rh_ext:.0f} % >= {c.dew_rh:.0f} %")
         # the ring only stands for the dome while it is not being heated
         if not data.heater_on and data.temp_hot - data.dew_point <= c.dew_margin:
             why.append(f"heater ring {data.temp_hot:.1f} C within {c.dew_margin:.1f} C "
                        f"of the dew point {data.dew_point:.1f} C")
         if trend is not None and trend >= c.dew_rise and data.rh_ext >= c.dew_rise_rh:
-            why.append(f"humidity {data.rh_ext:.0f} % rising {trend:.0f} %/h")
+            why.append(f"outside humidity {data.rh_ext:.0f} % rising {trend:.0f} %/h")
         return why
 
     def dropped(self, data):
@@ -94,9 +94,11 @@ class DewGuard:
         settled = (data.rh_ext < c.dew_rh - c.dew_hysteresis
                    and (trend is None or trend < c.dew_rise / 2)
                    and data.time - self.since >= c.dew_hold)
+        trend_txt = "" if trend is None else f", trend {trend:+.0f} %/h"
         if settled and not why:
-            trend_txt = "" if trend is None else f", trend {trend:+.0f} %/h"
             self.on, self.since = False, data.time
-            self.reason = f"humidity {data.rh_ext:.0f} %{trend_txt}"
+            self.reason = f"outside humidity {data.rh_ext:.0f} %{trend_txt}"
             return False
+        # keep the reason current, for the log when the board drops the heater
+        self.reason = "; ".join(why) or f"held on, outside humidity {data.rh_ext:.0f} %{trend_txt}"
         return None
