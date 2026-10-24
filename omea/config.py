@@ -100,7 +100,7 @@ class BoardConfig:
     heater_mode: str = "dew"        # "dew", "auto", "on" or "off"
     heater_temp: float = 10.0       # degC, outside temperature
     heater_rh: float = 80.0         # %, outside humidity
-    heater_power: int = 80          # % (80 to clear dome fog quickly)
+    heater_power: int = 70          # % (80 cleared dome fog fast but runs hot)
     dew_rh: float = 60.0            # %, heat above this outside humidity
     dew_margin: float = 4.0         # degC, ...or with the unheated ring this near the dew point
     dew_rise: float = 10.0          # %/h, ...or with the humidity rising this fast
