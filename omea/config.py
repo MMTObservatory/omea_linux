@@ -103,9 +103,7 @@ class BoardConfig:
     heater_power: int = 50          # % (70 cycled every 2 min while regulating)
     dew_rh: float = 60.0            # %, heat above this outside humidity
     dew_margin: float = 4.0         # degC, ...or with the unheated ring this near the dew point
-    dew_rise: float = 10.0          # %/h, ...or with the humidity rising this fast
-    dew_rise_rh: float = 40.0       # %, ...from this humidity up
-    dew_hysteresis: float = 10.0    # %, stop below dew_rh minus this
+    dew_hysteresis: float = 0.0     # %, stop below dew_rh minus this (for 10 min)
     dew_hold: float = 1800.0        # s, shortest heating spell
     dew_offset_night: float = 7.0   # degC, while heating hold the inside this far above outside
     dew_offset_day: float = 5.0     # degC, ...or this with the Sun up

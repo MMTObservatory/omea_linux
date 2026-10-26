@@ -9,14 +9,11 @@ over when
 
 * the outside humidity is above ``dew_rh``, or
 * the unheated heater ring is within ``dew_margin`` of the dew point, or
-* the humidity has risen faster than ``dew_rise`` per hour over the last hour
-  and is above ``dew_rise_rh``, or
 * the camera sees fog on the dome (``fog``, from the monitor's fog index),
 
 and hands it back to the board once the humidity has stayed ``dew_hysteresis``
 below ``dew_rh`` for ``SETTLE_WINDOW`` seconds (one low reading is often just
-noise), is no longer rising and it has had it for at least ``dew_hold``
-seconds. The heater is switched off before the board gets it back: its
+noise) and it has had it for at least ``dew_hold`` seconds. The heater is switched off before the board gets it back: its
 automatic mode leaves a heater it finds on running.
 
 While it has the heater it regulates rather than heating flat out: the inside
@@ -36,31 +33,8 @@ mode can't heat behind the guard's back.
 
 import math
 
-TREND_WINDOW = 3600.0       # s
-TREND_MIN_SPAN = 1800.0     # s of readings needed before trusting a trend
-TREND_MIN_POINTS = 10
 TEMP_RESUME = 1.0           # C below dew_temp_max to heat again
 SETTLE_WINDOW = 600.0       # s the humidity must stay low before handing back
-
-
-def rh_trend(rows, now, window=TREND_WINDOW):
-    """
-    Outside humidity rate of change (% per hour): a least-squares slope over
-    the ``rows`` (dicts with ``time`` and ``rh_ext``) of the last ``window``
-    seconds, or None with too little history.
-    """
-    pts = [(r["time"], r["rh_ext"]) for r in rows
-           if now - window <= r.get("time", -math.inf) <= now
-           and math.isfinite(r.get("rh_ext", math.nan))]
-    if len(pts) < TREND_MIN_POINTS or pts[-1][0] - pts[0][0] < TREND_MIN_SPAN:
-        return None
-    n = len(pts)
-    mt = sum(t for t, _ in pts) / n
-    mh = sum(h for _, h in pts) / n
-    var = sum((t - mt) ** 2 for t, _ in pts)
-    if var <= 0:
-        return None
-    return 3600.0 * sum((t - mt) * (h - mh) for t, h in pts) / var
 
 
 class DewGuard:
@@ -95,7 +69,7 @@ class DewGuard:
         self.state, self.heat, self.reason = state, heat, reason
         return "auto" if state == "auto" else ("on" if heat else "off")
 
-    def _reasons(self, data, trend, fog):
+    def _reasons(self, data, fog):
         c = self.cfg
         why = []
         if fog:
@@ -106,8 +80,6 @@ class DewGuard:
         if not data.heater_on and data.temp_hot - data.dew_point <= c.dew_margin:
             why.append(f"heater ring {data.temp_hot:.1f} C within {c.dew_margin:.1f} C "
                        f"of the dew point {data.dew_point:.1f} C")
-        if trend is not None and trend >= c.dew_rise and data.rh_ext >= c.dew_rise_rh:
-            why.append(f"outside humidity {data.rh_ext:.0f} % rising {trend:.0f} %/h")
         return why
 
     def _regulate(self, data, sun_up, ccd):
@@ -148,8 +120,7 @@ class DewGuard:
         the board) when the heater should switch, else None.
         """
         c = self.cfg
-        trend = rh_trend(rows, data.time)
-        why = self._reasons(data, trend, fog)
+        why = self._reasons(data, fog)
         if self.state == "auto":
             if not why:
                 return None
@@ -160,14 +131,12 @@ class DewGuard:
                   if data.time - SETTLE_WINDOW <= r.get("time", -math.inf) <= data.time
                   and math.isfinite(r.get("rh_ext", math.nan))]
         settled = (data.time - self.since >= c.dew_hold
-                   and max(recent + [data.rh_ext]) < c.dew_rh - c.dew_hysteresis
-                   and (trend is None or trend < c.dew_rise / 2))
-        trend_txt = "" if trend is None else f", trend {trend:+.0f} %/h"
+                   and max(recent + [data.rh_ext]) < c.dew_rh - c.dew_hysteresis)
         if settled and not why:
             return self.switch("auto", False,
-                                f"outside humidity {data.rh_ext:.0f} %{trend_txt}")
+                                f"outside humidity {data.rh_ext:.0f} %")
         heat, txt = self._regulate(data, sun_up, ccd)
-        demand = "; ".join(why) or f"outside humidity {data.rh_ext:.0f} %{trend_txt}"
+        demand = "; ".join(why) or f"outside humidity {data.rh_ext:.0f} %"
         if heat != self.heat:
             return self.switch("manual", heat, f"{txt} ({demand})")
         self.reason = f"{txt} ({demand})"

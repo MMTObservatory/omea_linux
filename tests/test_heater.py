@@ -1,6 +1,6 @@
 from omea import board
 from omea.config import BoardConfig
-from omea.heater import DewGuard, rh_trend
+from omea.heater import DewGuard
 
 
 def reading(t, temp, rh, hot=None, heater=False, inside=3.0):
@@ -10,30 +10,20 @@ def reading(t, temp, rh, hot=None, heater=False, inside=3.0):
                            dew_point=board.dew_point(temp, rh))
 
 
-def test_trend_needs_half_an_hour():
-    rows = [{"time": 30.0 * i, "rh_ext": 30 + 0.1 * i} for i in range(40)]
-    assert rh_trend(rows, rows[-1]["time"]) is None             # 20 min
-    rows = [{"time": 30.0 * i, "rh_ext": 30 + 0.1 * i} for i in range(120)]
-    assert abs(rh_trend(rows, rows[-1]["time"]) - 12.0) < 1e-6  # 0.1 % per 30 s
-
-
-def test_rising_humidity_heats_early_and_stops_late():
-    """Tonight's case: humidity climbing ~25 %/h at 7-9 C; the dome fogged near 78 %."""
+def test_humid_night_heats_then_hands_back_when_dry():
     cfg = BoardConfig()
     guard = DewGuard(cfg)
     rows, switches = [], []
-    for i in range(240):                    # 2 h at 30 s
+    for i in range(240):                    # 2 h at 30 s, humidity climbing 25 -> 80 %
         t = 30.0 * i
         rh = 25 + 55 * i / 240
-        data = reading(t, 8.0, rh, heater=guard.on)
         rows.append({"time": t, "rh_ext": rh})
-        s = guard.update(data, rows)
+        s = guard.update(reading(t, 8.0, rh, heater=guard.on), rows)
         if s is not None:
             switches.append((t, s, rh))
-    assert switches and switches[0][1] == "on"
-    assert switches[0][2] < 50              # well before the 80 % board threshold
-    assert "rising" in guard.reason
-    # now drying out: stays on through the hold, then hands back
+    assert switches[0][1] == "on" and switches[0][2] >= cfg.dew_rh
+    assert ">= 60 %" in guard.reason
+    # now drying out: hands back once it has been below 60 % for 10 min
     t0 = rows[-1]["time"]
     for i in range(1, 240):
         t = t0 + 30.0 * i
@@ -43,7 +33,7 @@ def test_rising_humidity_heats_early_and_stops_late():
         if s is not None:
             switches.append((t, s, rh))
     assert [s for _, s, _ in switches] == ["on", "auto"]
-    assert switches[1][2] < cfg.dew_rh - cfg.dew_hysteresis
+    assert switches[1][2] <= cfg.dew_rh - 20    # 20 readings below 60 %
 
 
 def test_cold_dome_near_dew_point_heats():
@@ -123,7 +113,7 @@ def test_monitor_forces_heater_and_restores_auto():
 
 
 def test_one_low_reading_does_not_hand_back():
-    """10-26 11:28 UT: one 48 % reading among 51-57 % handed the heater back."""
+    """10-26 11:28 UT: one low reading among higher ones handed the heater back."""
     guard = DewGuard(BoardConfig())
     rows = []
 
@@ -133,16 +123,18 @@ def test_one_low_reading_does_not_hand_back():
 
     assert feed(0.0, 70.0) == "on"
     t = 0.0
-    while t < 3600:                          # past the hold, humidity flat ~55 %
+    while t < 3600:                          # past the hold, humidity ~61 %
         t += 30.0
-        assert feed(t, 55.0) in (None, "on", "off")
-    assert feed(t + 30, 48.0) != "auto"      # one dip
+        feed(t, 61.0)
+    assert feed(t + 30, 55.0) != "auto"      # one dip
+    assert feed(t + 60, 61.0) != "auto"
     assert guard.state == "manual"
-    for i in range(2, 30):                   # properly dry for 15 min
-        s = feed(t + 30.0 * i, 45.0)
-        if s == "auto":
+    handed = None
+    for i in range(3, 40):                   # properly dry
+        if feed(t + 30.0 * i, 55.0) == "auto":
+            handed = 30.0 * i - 60
             break
-    assert guard.state == "auto"
+    assert handed is not None and handed > 600   # 10 min after the last high reading
 
 
 def _phot(high_ext, low_ext, high_lost=0):
