@@ -194,6 +194,7 @@ class Monitor:
                 self.camera.close()
             if self.board is not None:
                 if self.dew.state != "auto":
+                    self.dew.switch("auto", False, "stopping")
                     self._force_heater("auto", "stopping")
                 self.board.close()
             self.status.update(state="stopped")
@@ -305,21 +306,28 @@ class Monitor:
         if not auto:
             self.board.set_heater(b.heater_mode == "on")
 
-    def _force_heater(self, state, reason):
-        """dew mode: force the heater "on" or "off", or hand it back to the board ("auto")."""
+    def _force_heater(self, state, reason, configure=False):
+        """
+        dew mode: switch the heater "on" or "off" in manual mode, or hand it
+        back to the board's automatic mode ("auto"). The board's settings are
+        only rewritten going in or out of manual mode (or with ``configure``),
+        not on every regulating switch.
+        """
         b = self.cfg.board
+        entering = self.dew.previous == "auto"
         try:
-            self.board.set_config(b.heater_temp, b.heater_rh, state == "auto", b.heater_power)
+            if state == "auto" or entering or configure:
+                self.board.set_config(b.heater_temp, b.heater_rh, state == "auto", b.heater_power)
             if state != "auto":
                 self.board.set_heater(state == "on")
         except Exception as err:                               # noqa: BLE001
             log.warning("dome heater switch failed: %s", err)
-            self.dew.state = self.dew.previous  # try again at the next reading
+            self.dew.undo()
             return
         if state == "auto":
             log.info("dome heater back to automatic: %s", reason)
         else:
-            log.info("dome heater %s: %s", state, reason)
+            log.info("dome heater %s%s: %s", state, ", regulating" if entering else "", reason)
 
     def _set_iris(self, fratio):
         """Drive the iris; returns the f-ratio now in front of the sensor."""
@@ -724,11 +732,14 @@ class Monitor:
                         with self.status.lock:
                             rows = list(self.status.weather)
                         sun_up = self.site.sun_altitude(self.clock.now()) > 0
-                        switch = self.dew.update(data, rows, fog=self.dome_fog, sun_up=sun_up)
+                        switch = self.dew.update(data, rows, fog=self.dome_fog, sun_up=sun_up,
+                                                 ccd=ccd)
                         if switch is not None:
                             self._force_heater(switch, self.dew.reason)
                         elif self.dew.dropped(data):
-                            self._force_heater("on", f"the board had dropped it ({self.dew.reason})")
+                            reason = f"the board had dropped it ({self.dew.reason})"
+                            self._force_heater(self.dew.switch("manual", True, reason), reason,
+                                               configure=True)
                     local = self.site.local(self.clock.now())
                     if cfg.output.weather_csv:
                         outputs.append_weather(cfg.output.weather_csv,

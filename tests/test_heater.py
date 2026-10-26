@@ -69,49 +69,39 @@ def test_dropped_heater_is_forced_again_once_the_ring_cools():
     assert guard.dropped(reading(90.0, 8.0, 99.0, hot=12.0))
     # the reason logged on re-forcing is the current humidity, not the switch-on one
     assert guard.update(reading(120.0, 8.0, 76.0, hot=12.0), []) is None
-    assert guard.reason == "outside humidity 76 % >= 60 %"
+    assert guard.reason == "inside +3.0 C on outside, target +7.0 C (outside humidity 76 % >= 60 %)"
     assert guard.update(reading(150.0, 8.0, 55.0, hot=12.0), []) is None
-    assert guard.reason == "held on, outside humidity 55 %"
+    assert guard.reason.endswith("(outside humidity 55 %)")
 
 
-def test_warm_inside_holds_the_heater_off():
+def test_regulates_inside_offset_day_and_night():
     guard = DewGuard(BoardConfig())
-    assert guard.update(reading(0.0, 4.0, 92.0, inside=10.0), []) == "on"
-    # the warmth cap overrides the shortest heating spell and the humidity rule
-    assert guard.update(reading(30.0, 4.0, 92.0, inside=12.2, heater=True), []) == "off"
-    assert "above outside" in guard.reason
-    assert not guard.dropped(reading(60.0, 4.0, 92.0, hot=12.0, inside=12.0))
-    assert guard.update(reading(60.0, 4.0, 92.0, inside=11.5), []) is None   # hysteresis
-    assert guard.reason.startswith("held off")
-    assert guard.update(reading(90.0, 4.0, 92.0, inside=10.9), []) == "on"   # still humid
-    # warm with nothing asking for heat: forced off too, so the board's own mode can't heat
-    guard = DewGuard(BoardConfig())
-    assert guard.update(reading(0.0, 12.0, 40.0, inside=13.0), []) == "off"
-    assert guard.update(reading(30.0, 12.0, 40.0, inside=3.5), []) == "auto"
+    assert guard.update(reading(0.0, 4.0, 92.0, inside=3.0), []) == "on"
+    assert "target +7.0 C" in guard.reason
+    assert guard.update(reading(30.0, 4.0, 92.0, inside=7.2, heater=True), []) is None  # in band
+    assert guard.update(reading(60.0, 4.0, 92.0, inside=7.6, heater=True), []) == "off"
+    assert guard.state == "manual"          # forced off, not handed to the board
+    assert guard.update(reading(90.0, 4.0, 92.0, inside=6.8), []) is None
+    assert guard.update(reading(120.0, 4.0, 92.0, inside=6.4), []) == "on"
+    # Sun up: a 5 C target, and sunshine alone keeps the inside above it
+    assert guard.update(reading(150.0, 4.0, 92.0, inside=6.4, heater=True), [], sun_up=True) == "off"
+    assert guard.update(reading(180.0, 4.0, 92.0, inside=4.4), [], sun_up=True) == "on"
 
 
-def test_daylight_dry_out_stops_the_heater():
-    """10-25 morning: sunny, humidity falling from 92 % to 50 %, the heater on throughout."""
+def test_ring_and_temperature_limits():
     guard = DewGuard(BoardConfig())
-    rows = []
-    states = []
-    for i in range(480):                    # 4 h at 30 s, -10 %/h
-        t = 30.0 * i
-        rh = 92 - 10 * t / 3600
-        rows.append({"time": t, "rh_ext": rh})
-        hot = 12.0 if t > 7200 else None      # a sunlit ring runs warm
-        s = guard.update(reading(t, 6.0, rh, hot=hot, heater=guard.on), rows, sun_up=t > 7200)
-        if s is not None:
-            states.append((t, s))
-    # on at night for the humidity; off soon after sunrise, still above 60 %
-    assert states[0] == (0.0, "on")
-    assert states[1][1] == "auto" and 7200 < states[1][0] < 7300
-    assert "Sun up" in guard.reason
-    assert len(states) == 2
-    # the same falling humidity at night keeps it on
-    guard = DewGuard(BoardConfig())
-    assert guard.update(reading(0.0, 6.0, 70.0), rows[:200]) == "on"
-    assert guard.update(reading(3600.0, 6.0, 70.0, heater=True), rows[:200]) is None
+    assert guard.update(reading(0.0, 4.0, 92.0), []) == "on"
+    assert guard.update(reading(30.0, 4.0, 92.0, hot=32.6, heater=True), []) == "off"
+    assert "heater ring" in guard.reason
+    assert guard.update(reading(60.0, 4.0, 92.0, hot=31.0), []) is None    # not cool enough yet
+    assert not guard.dropped(reading(60.0, 4.0, 92.0, hot=12.0))
+    assert guard.update(reading(90.0, 4.0, 92.0, hot=29.5), []) == "on"
+    # a warm inside or camera sensor holds it off until 1 C below the limit
+    assert guard.update(reading(120.0, 28.0, 92.0, inside=2.5, heater=True), []) == "off"
+    assert guard.update(reading(150.0, 25.0, 92.0, inside=4.5), []) is None   # 29.5 C
+    assert guard.update(reading(180.0, 25.0, 92.0, inside=3.5), []) == "on"   # 28.5 C
+    assert guard.update(reading(210.0, 4.0, 92.0, heater=True), [], ccd=31.0) == "off"
+    assert "camera sensor 31.0 C" in guard.reason
 
 
 def test_monitor_forces_heater_and_restores_auto():
@@ -176,7 +166,7 @@ def test_dome_fog_flag_hysteresis_and_heater():
     assert flags.index(1) == 32                    # 30 min after the index reached 0.2
     guard = DewGuard(BoardConfig())
     assert guard.update(reading(0.0, 8.0, 30.0), [], fog=True) == "on"
-    assert guard.reason == "fog on the dome"
+    assert guard.reason.startswith("fog on the dome; ")
 
 
 def test_csv_keeps_an_older_header(tmp_path):

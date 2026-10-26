@@ -4,29 +4,32 @@ Proactive dome-heater control.
 The board's own automatic mode heats only once the outside humidity is above
 a fixed threshold, and the dome can fog well before that: under a clear sky it
 radiates below the air temperature (the unheated ring reads 1-2 C under it).
-:class:`DewGuard` decides from the board readings instead, heating when
+:class:`DewGuard` decides from the board readings instead. It takes the heater
+over when
 
 * the outside humidity is above ``dew_rh``, or
-* the unheated heater ring (a proxy for the dome) is within ``dew_margin`` of
-  the dew point, or
+* the unheated heater ring is within ``dew_margin`` of the dew point, or
 * the humidity has risen faster than ``dew_rise`` per hour over the last hour
   and is above ``dew_rise_rh``, or
 * the camera sees fog on the dome (``fog``, from the monitor's fog index),
 
-and stopping once the humidity is ``dew_hysteresis`` below ``dew_rh``, is no
-longer rising and the heater has run for at least ``dew_hold`` seconds. With
-the Sun up and the humidity falling (the morning dry-out) the humidity level
-does not count, and the heater stops after ``dew_hold`` whatever the level.
+and hands it back to the board once the humidity is ``dew_hysteresis`` below
+``dew_rh``, is no longer rising and it has had it for at least ``dew_hold``
+seconds.
 
-Whatever the rules say, the heater is held off while the inside of the housing
-is more than ``dew_warm`` above the outside air (sunshine, or the heater has
-already warmed it), until it is back within ``dew_warm - dew_warm_hysteresis``.
-Held off means forced off, not handed back: the board's own automatic mode
-would otherwise heat regardless.
+While it has the heater it regulates rather than heating flat out: the inside
+of the housing (a good proxy for the dome) is held ``dew_offset_night`` above
+the outside air (``dew_offset_day`` with the Sun up), within
+``dew_offset_band`` either way. Sunshine alone usually warms the inside past
+that, so the heater mostly stays off by day. It is also off
 
-The board's firmware drops a forced heater for good once the ring reaches
-about 35 C (every sunny afternoon, 10-15 to 10-18), so the guard asks for it to
-be forced on again once the ring has cooled below ``RING_RESUME``.
+* once the heater ring reaches ``dew_ring_max``, until it is below
+  ``dew_ring_resume`` (the firmware drops a forced heater for good at ~35 C), and
+* while the inside or the camera sensor is above ``dew_temp_max``, until both
+  are back 1 C below it.
+
+Off here means forced off with the board in manual mode, so its automatic
+mode can't heat behind the guard's back.
 """
 
 import math
@@ -34,7 +37,7 @@ import math
 TREND_WINDOW = 3600.0       # s
 TREND_MIN_SPAN = 1800.0     # s of readings needed before trusting a trend
 TREND_MIN_POINTS = 10
-RING_RESUME = 30.0          # C, re-force a dropped heater once the ring is below this
+TEMP_RESUME = 1.0           # C below dew_temp_max to heat again
 
 
 def rh_trend(rows, now, window=TREND_WINDOW):
@@ -58,31 +61,43 @@ def rh_trend(rows, now, window=TREND_WINDOW):
 
 
 class DewGuard:
-    """Heater on/off decisions from board readings; see the module docstring."""
+    """Heater decisions from board readings; see the module docstring."""
 
     def __init__(self, cfg):
         self.cfg = cfg                      # BoardConfig
-        self.state = "auto"                 # "auto" (the board's own), "on" or "off" (forced)
-        self.previous = "auto"              # to go back to if the switch fails
-        self.since = -math.inf              # time of the last switch to "on"
+        self.state = "auto"                 # "auto" (the board's own) or "manual" (regulating)
+        self.heat = False                   # in manual: heater on
+        self.since = -math.inf              # time the guard took the heater
         self.reason = ""
-
-    def _switch(self, state, reason, now):
-        self.previous, self.state, self.reason = self.state, state, reason
-        if state == "on":
-            self.since = now
-        return state
+        self.ring_hot = False
+        self.too_warm = False
+        self._undo = ("auto", False)
 
     @property
     def on(self):
-        return self.state == "on"
+        return self.state == "manual" and self.heat
 
-    def _reasons(self, data, trend, fog, drying):
+    @property
+    def previous(self):
+        """The state before the last switch."""
+        return self._undo[0]
+
+    def undo(self):
+        """The last switch failed: go back, to try again at the next reading."""
+        self.state, self.heat = self._undo
+
+    def switch(self, state, heat, reason):
+        """Record a switch; returns "on", "off" or "auto" for the board."""
+        self._undo = (self.state, self.heat)
+        self.state, self.heat, self.reason = state, heat, reason
+        return "auto" if state == "auto" else ("on" if heat else "off")
+
+    def _reasons(self, data, trend, fog):
         c = self.cfg
         why = []
         if fog:
             why.append("fog on the dome")
-        if data.rh_ext >= c.dew_rh and not drying:
+        if data.rh_ext >= c.dew_rh:
             why.append(f"outside humidity {data.rh_ext:.0f} % >= {c.dew_rh:.0f} %")
         # the ring only stands for the dome while it is not being heated
         if not data.heater_on and data.temp_hot - data.dew_point <= c.dew_margin:
@@ -92,44 +107,62 @@ class DewGuard:
             why.append(f"outside humidity {data.rh_ext:.0f} % rising {trend:.0f} %/h")
         return why
 
+    def _regulate(self, data, sun_up, ccd):
+        """Whether the heater should be on while regulating, and why."""
+        c = self.cfg
+        if data.temp_hot >= c.dew_ring_max:
+            self.ring_hot = True
+        elif data.temp_hot < c.dew_ring_resume:
+            self.ring_hot = False
+        warmest = max(data.temp_int, ccd if math.isfinite(ccd) else -math.inf)
+        if warmest > c.dew_temp_max:
+            self.too_warm = True
+        elif warmest <= c.dew_temp_max - TEMP_RESUME:
+            self.too_warm = False
+        offset = data.temp_int - data.temp_ext
+        target = c.dew_offset_day if sun_up else c.dew_offset_night
+        txt = f"inside {offset:+.1f} C on outside, target {target:+.1f} C"
+        if self.too_warm:
+            sensor = f", camera sensor {ccd:.1f} C" if math.isfinite(ccd) else ""
+            return False, f"inside {data.temp_int:.1f} C{sensor}, limit {c.dew_temp_max:.0f} C"
+        if self.ring_hot:
+            return False, f"heater ring {data.temp_hot:.1f} C, limit {c.dew_ring_max:.1f} C"
+        if offset < target - c.dew_offset_band:
+            return True, txt
+        if offset > target + c.dew_offset_band:
+            return False, txt
+        return self.heat, txt
+
     def dropped(self, data):
         """True when the heater should be on but the board has turned it off."""
-        return self.on and not data.heater_on and data.temp_hot < RING_RESUME
+        return self.on and not data.heater_on and data.temp_hot < self.cfg.dew_ring_resume
 
-    def update(self, data, rows, fog=False, sun_up=False):
+    def update(self, data, rows, fog=False, sun_up=False, ccd=math.nan):
         """
-        Feed one reading (:class:`omea.board.BoardData`) and the recent history
-        ``rows`` (and whether the camera sees dome fog, and the Sun is up);
-        returns the new state ("on", "off" or "auto") when the heater should
-        switch, else None.
+        Feed one reading (:class:`omea.board.BoardData`), the recent history
+        ``rows``, whether the camera sees dome fog and the Sun is up, and the
+        camera sensor temperature; returns "on", "off" or "auto" (hand back to
+        the board) when the heater should switch, else None.
         """
         c = self.cfg
         trend = rh_trend(rows, data.time)
-        drying = sun_up and trend is not None and trend < 0
-        why = self._reasons(data, trend, fog, drying)
-        warmth = data.temp_int - data.temp_ext
-        warm_txt = (f"inside {data.temp_int:.1f} C, {warmth:.1f} C above outside "
-                    f"{data.temp_ext:.1f} C")
-        if self.state == "off":
-            if warmth > c.dew_warm - c.dew_warm_hysteresis:
-                self.reason = f"held off, {warm_txt}"
-                return None
+        why = self._reasons(data, trend, fog)
+        if self.state == "auto":
             if not why:
-                return self._switch("auto", warm_txt, data.time)
-        elif warmth > c.dew_warm:
-            return self._switch("off", f"{warm_txt} > {c.dew_warm:.1f} C", data.time)
-        if self.state != "on":
-            if why:
-                return self._switch("on", "; ".join(why), data.time)
-            return None
+                return None
+            self.since = data.time
+            heat, txt = self._regulate(data, sun_up, ccd)
+            return self.switch("manual", heat, f"{'; '.join(why)}; {txt}")
         settled = (data.time - self.since >= c.dew_hold
-                   and (drying or (data.rh_ext < c.dew_rh - c.dew_hysteresis
-                                   and (trend is None or trend < c.dew_rise / 2))))
+                   and data.rh_ext < c.dew_rh - c.dew_hysteresis
+                   and (trend is None or trend < c.dew_rise / 2))
         trend_txt = "" if trend is None else f", trend {trend:+.0f} %/h"
         if settled and not why:
-            day = ", Sun up" if drying else ""
-            return self._switch("auto", f"outside humidity {data.rh_ext:.0f} %{trend_txt}{day}",
-                                data.time)
-        # keep the reason current, for the log when the board drops the heater
-        self.reason = "; ".join(why) or f"held on, outside humidity {data.rh_ext:.0f} %{trend_txt}"
+            return self.switch("auto", False,
+                                f"outside humidity {data.rh_ext:.0f} %{trend_txt}")
+        heat, txt = self._regulate(data, sun_up, ccd)
+        demand = "; ".join(why) or f"outside humidity {data.rh_ext:.0f} %{trend_txt}"
+        if heat != self.heat:
+            return self.switch("manual", heat, f"{txt} ({demand})")
+        self.reason = f"{txt} ({demand})"
         return None

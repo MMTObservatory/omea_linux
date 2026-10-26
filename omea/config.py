@@ -101,14 +101,18 @@ class BoardConfig:
     heater_temp: float = 10.0       # degC, outside temperature
     heater_rh: float = 80.0         # %, outside humidity
     heater_power: int = 70          # % (80 cleared dome fog fast but runs hot)
-    dew_rh: float = 60.0            # %, heat above this outside humidity (not while drying in daylight)
+    dew_rh: float = 60.0            # %, heat above this outside humidity
     dew_margin: float = 4.0         # degC, ...or with the unheated ring this near the dew point
     dew_rise: float = 10.0          # %/h, ...or with the humidity rising this fast
     dew_rise_rh: float = 40.0       # %, ...from this humidity up
     dew_hysteresis: float = 10.0    # %, stop below dew_rh minus this
     dew_hold: float = 1800.0        # s, shortest heating spell
-    dew_warm: float = 12.0          # degC, never heat with the inside this far above outside
-    dew_warm_hysteresis: float = 1.0  # degC, ...until it is back within dew_warm minus this
+    dew_offset_night: float = 7.0   # degC, while heating hold the inside this far above outside
+    dew_offset_day: float = 5.0     # degC, ...or this with the Sun up
+    dew_offset_band: float = 0.5    # degC, either side of it
+    dew_ring_max: float = 32.5      # degC, heater ring: off here (firmware cuts out ~35)
+    dew_ring_resume: float = 30.0   # degC, ...on again below this
+    dew_temp_max: float = 30.0      # degC, no heat with the inside or camera sensor above this
 
 
 @dataclass
