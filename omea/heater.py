@@ -13,9 +13,11 @@ over when
   and is above ``dew_rise_rh``, or
 * the camera sees fog on the dome (``fog``, from the monitor's fog index),
 
-and hands it back to the board once the humidity is ``dew_hysteresis`` below
-``dew_rh``, is no longer rising and it has had it for at least ``dew_hold``
-seconds.
+and hands it back to the board once the humidity has stayed ``dew_hysteresis``
+below ``dew_rh`` for ``SETTLE_WINDOW`` seconds (one low reading is often just
+noise), is no longer rising and it has had it for at least ``dew_hold``
+seconds. The heater is switched off before the board gets it back: its
+automatic mode leaves a heater it finds on running.
 
 While it has the heater it regulates rather than heating flat out: the inside
 of the housing (a good proxy for the dome) is held ``dew_offset_night`` above
@@ -38,6 +40,7 @@ TREND_WINDOW = 3600.0       # s
 TREND_MIN_SPAN = 1800.0     # s of readings needed before trusting a trend
 TREND_MIN_POINTS = 10
 TEMP_RESUME = 1.0           # C below dew_temp_max to heat again
+SETTLE_WINDOW = 600.0       # s the humidity must stay low before handing back
 
 
 def rh_trend(rows, now, window=TREND_WINDOW):
@@ -153,8 +156,11 @@ class DewGuard:
             self.since = data.time
             heat, txt = self._regulate(data, sun_up, ccd)
             return self.switch("manual", heat, f"{'; '.join(why)}; {txt}")
+        recent = [r["rh_ext"] for r in rows
+                  if data.time - SETTLE_WINDOW <= r.get("time", -math.inf) <= data.time
+                  and math.isfinite(r.get("rh_ext", math.nan))]
         settled = (data.time - self.since >= c.dew_hold
-                   and data.rh_ext < c.dew_rh - c.dew_hysteresis
+                   and max(recent + [data.rh_ext]) < c.dew_rh - c.dew_hysteresis
                    and (trend is None or trend < c.dew_rise / 2))
         trend_txt = "" if trend is None else f", trend {trend:+.0f} %/h"
         if settled and not why:

@@ -316,6 +316,9 @@ class Monitor:
         b = self.cfg.board
         entering = self.dew.previous == "auto"
         try:
+            if state == "auto":
+                # the board's automatic mode keeps a heater it finds on running
+                self.board.set_heater(False)
             if state == "auto" or entering or configure:
                 self.board.set_config(b.heater_temp, b.heater_rh, state == "auto", b.heater_power)
             if state != "auto":

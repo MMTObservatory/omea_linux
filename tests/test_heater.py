@@ -116,8 +116,33 @@ def test_monitor_forces_heater_and_restores_auto():
     assert not mon.board.auto and mon.board.read().heater_on
     mon._force_heater("off", "test")
     assert not mon.board.auto and not mon.board.read().heater_on
+    mon._force_heater("on", "test")
     mon._force_heater("auto", "test")
     assert mon.board.auto and mon.board.thresholds == (10.0, 80.0)
+    assert not mon.board.heater             # handed back switched off
+
+
+def test_one_low_reading_does_not_hand_back():
+    """10-26 11:28 UT: one 48 % reading among 51-57 % handed the heater back."""
+    guard = DewGuard(BoardConfig())
+    rows = []
+
+    def feed(t, rh):
+        rows.append({"time": t, "rh_ext": rh})
+        return guard.update(reading(t, 6.0, rh, heater=guard.on), rows)
+
+    assert feed(0.0, 70.0) == "on"
+    t = 0.0
+    while t < 3600:                          # past the hold, humidity flat ~55 %
+        t += 30.0
+        assert feed(t, 55.0) in (None, "on", "off")
+    assert feed(t + 30, 48.0) != "auto"      # one dip
+    assert guard.state == "manual"
+    for i in range(2, 30):                   # properly dry for 15 min
+        s = feed(t + 30.0 * i, 45.0)
+        if s == "auto":
+            break
+    assert guard.state == "auto"
 
 
 def _phot(high_ext, low_ext, high_lost=0):

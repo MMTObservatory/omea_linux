@@ -51,7 +51,7 @@ port = "/dev/ttyUSB0"              # the FTDI RS232 adapter (Windows COM3)
 # heater_mode = "dew"               # "dew", "auto", "on" or "off"
 # heater_temp = 10.0                # auto: heat below this outside temperature (C)
 # heater_rh = 80.0                  # ...and above this outside humidity (%)
-# heater_power = 70                 # %
+# heater_power = 50                 # %
 # "dew": the board keeps the auto thresholds above as a backstop, and the
 # service forces the heater on earlier (omea/heater.py) when
 # dew_rh = 60.0                     # outside humidity is above this (%), or
