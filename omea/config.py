@@ -101,12 +101,14 @@ class BoardConfig:
     heater_temp: float = 10.0       # degC, outside temperature
     heater_rh: float = 80.0         # %, outside humidity
     heater_power: int = 70          # % (80 cleared dome fog fast but runs hot)
-    dew_rh: float = 60.0            # %, heat above this outside humidity
+    dew_rh: float = 60.0            # %, heat above this outside humidity (not while drying in daylight)
     dew_margin: float = 4.0         # degC, ...or with the unheated ring this near the dew point
     dew_rise: float = 10.0          # %/h, ...or with the humidity rising this fast
     dew_rise_rh: float = 40.0       # %, ...from this humidity up
     dew_hysteresis: float = 10.0    # %, stop below dew_rh minus this
     dew_hold: float = 1800.0        # s, shortest heating spell
+    dew_warm: float = 12.0          # degC, never heat with the inside this far above outside
+    dew_warm_hysteresis: float = 1.0  # degC, ...until it is back within dew_warm minus this
 
 
 @dataclass

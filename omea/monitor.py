@@ -193,8 +193,8 @@ class Monitor:
             if self.camera is not None:
                 self.camera.close()
             if self.board is not None:
-                if self.dew.on:
-                    self._force_heater(False, "stopping")
+                if self.dew.state != "auto":
+                    self._force_heater("auto", "stopping")
                 self.board.close()
             self.status.update(state="stopped")
 
@@ -305,21 +305,21 @@ class Monitor:
         if not auto:
             self.board.set_heater(b.heater_mode == "on")
 
-    def _force_heater(self, on, reason):
-        """dew mode: force the heater on, or hand it back to the board's automatic mode."""
+    def _force_heater(self, state, reason):
+        """dew mode: force the heater "on" or "off", or hand it back to the board ("auto")."""
         b = self.cfg.board
         try:
-            self.board.set_config(b.heater_temp, b.heater_rh, not on, b.heater_power)
-            if on:
-                self.board.set_heater(True)
+            self.board.set_config(b.heater_temp, b.heater_rh, state == "auto", b.heater_power)
+            if state != "auto":
+                self.board.set_heater(state == "on")
         except Exception as err:                               # noqa: BLE001
             log.warning("dome heater switch failed: %s", err)
-            self.dew.on = not on                # try again at the next reading
+            self.dew.state = self.dew.previous  # try again at the next reading
             return
-        if on:
-            log.info("dome heater on: %s", reason)
-        else:
+        if state == "auto":
             log.info("dome heater back to automatic: %s", reason)
+        else:
+            log.info("dome heater %s: %s", state, reason)
 
     def _set_iris(self, fratio):
         """Drive the iris; returns the f-ratio now in front of the sensor."""
@@ -723,11 +723,12 @@ class Monitor:
                     if cfg.board.heater_mode == "dew":
                         with self.status.lock:
                             rows = list(self.status.weather)
-                        switch = self.dew.update(data, rows, fog=self.dome_fog)
+                        sun_up = self.site.sun_altitude(self.clock.now()) > 0
+                        switch = self.dew.update(data, rows, fog=self.dome_fog, sun_up=sun_up)
                         if switch is not None:
                             self._force_heater(switch, self.dew.reason)
                         elif self.dew.dropped(data):
-                            self._force_heater(True, f"the board had dropped it ({self.dew.reason})")
+                            self._force_heater("on", f"the board had dropped it ({self.dew.reason})")
                     local = self.site.local(self.clock.now())
                     if cfg.output.weather_csv:
                         outputs.append_weather(cfg.output.weather_csv,

@@ -54,12 +54,15 @@ port = "/dev/ttyUSB0"              # the FTDI RS232 adapter (Windows COM3)
 # heater_power = 70                 # %
 # "dew": the board keeps the auto thresholds above as a backstop, and the
 # service forces the heater on earlier (omea/heater.py) when
-# dew_rh = 60.0                     # outside humidity is above this (%), or
+# dew_rh = 60.0                     # outside humidity is above this (%; not if falling
+#                                   # with the Sun up), or
 # dew_margin = 4.0                  # the unheated ring is this near the dew point (C), or
 # dew_rise = 10.0                   # humidity rises this fast (%/h, over an hour)
 # dew_rise_rh = 40.0                # ...from this humidity up (%);
 # dew_hysteresis = 10.0             # it hands back below dew_rh minus this,
 # dew_hold = 1800.0                 # after at least this long on (s)
+# dew_warm = 12.0                   # never heat with the inside this far above outside (C),
+# dew_warm_hysteresis = 1.0         # ...until it is back within dew_warm minus this
 
 [output]
 data_dir = "/mnt/d/skycam"
