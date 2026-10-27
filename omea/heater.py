@@ -9,18 +9,21 @@ over when
 
 * the outside humidity is above ``dew_rh``, or
 * the unheated heater ring is within ``dew_margin`` of the dew point, or
-* the camera sees fog on the dome (``fog``, from the monitor's fog index),
+* the camera sees fog on the dome (``fog``, from the monitor's fog index), or
+* the outside or inside is below ``dew_inside_min`` (keeping the inside from
+  freezing on cold, dry winter nights that the humidity rules would miss),
 
 and hands it back to the board once the humidity has stayed ``dew_hysteresis``
 below ``dew_rh`` for ``SETTLE_WINDOW`` seconds (one low reading is often just
-noise) and it has had it for at least ``dew_hold`` seconds. The heater is switched off before the board gets it back: its
-automatic mode leaves a heater it finds on running.
+noise) and it has had it for at least ``dew_hold`` seconds. The heater is
+switched off before the board gets it back: its automatic mode leaves a heater
+it finds on running.
 
 While it has the heater it regulates rather than heating flat out: the inside
-of the housing (a good proxy for the dome) is held ``dew_offset_night`` above
-the outside air (``dew_offset_day`` with the Sun up), within
-``dew_offset_band`` either way. Sunshine alone usually warms the inside past
-that, so the heater mostly stays off by day. It is also off
+of the housing (a good proxy for the dome) is held ``dew_inside_margin`` above
+the dew point, but no colder than ``dew_inside_min``, within ``dew_band``
+either way. The inside usually sits a few C above the outside air unheated,
+so at moderate humidity the heater mostly stays off. It is also off
 
 * once the heater ring reaches ``dew_ring_max``, until it is below
   ``dew_ring_resume`` (the firmware drops a forced heater for good at ~35 C), and
@@ -80,9 +83,19 @@ class DewGuard:
         if not data.heater_on and data.temp_hot - data.dew_point <= c.dew_margin:
             why.append(f"heater ring {data.temp_hot:.1f} C within {c.dew_margin:.1f} C "
                        f"of the dew point {data.dew_point:.1f} C")
+        coldest = min(data.temp_ext, data.temp_int)
+        if coldest < c.dew_inside_min:
+            why.append(f"{'outside' if coldest == data.temp_ext else 'inside'} "
+                       f"{coldest:.1f} C < {c.dew_inside_min:.0f} C")
         return why
 
-    def _regulate(self, data, sun_up, ccd):
+    def target(self, data):
+        """The inside temperature to hold while regulating."""
+        c = self.cfg
+        dew = data.dew_point if math.isfinite(data.dew_point) else -math.inf
+        return max(dew + c.dew_inside_margin, c.dew_inside_min)
+
+    def _regulate(self, data, ccd):
         """Whether the heater should be on while regulating, and why."""
         c = self.cfg
         if data.temp_hot >= c.dew_ring_max:
@@ -94,17 +107,17 @@ class DewGuard:
             self.too_warm = True
         elif warmest <= c.dew_temp_max - TEMP_RESUME:
             self.too_warm = False
-        offset = data.temp_int - data.temp_ext
-        target = c.dew_offset_day if sun_up else c.dew_offset_night
-        txt = f"inside {offset:+.1f} C on outside, target {target:+.1f} C"
+        target = self.target(data)
+        txt = (f"inside {data.temp_int:.1f} C, target {target:.1f} C "
+               f"(dew point {data.dew_point:.1f} C)")
         if self.too_warm:
             sensor = f", camera sensor {ccd:.1f} C" if math.isfinite(ccd) else ""
             return False, f"inside {data.temp_int:.1f} C{sensor}, limit {c.dew_temp_max:.0f} C"
         if self.ring_hot:
             return False, f"heater ring {data.temp_hot:.1f} C, limit {c.dew_ring_max:.1f} C"
-        if offset < target - c.dew_offset_band:
+        if data.temp_int < target - c.dew_band:
             return True, txt
-        if offset > target + c.dew_offset_band:
+        if data.temp_int > target + c.dew_band:
             return False, txt
         return self.heat, txt
 
@@ -112,12 +125,12 @@ class DewGuard:
         """True when the heater should be on but the board has turned it off."""
         return self.on and not data.heater_on and data.temp_hot < self.cfg.dew_ring_resume
 
-    def update(self, data, rows, fog=False, sun_up=False, ccd=math.nan):
+    def update(self, data, rows, fog=False, ccd=math.nan):
         """
         Feed one reading (:class:`omea.board.BoardData`), the recent history
-        ``rows``, whether the camera sees dome fog and the Sun is up, and the
-        camera sensor temperature; returns "on", "off" or "auto" (hand back to
-        the board) when the heater should switch, else None.
+        ``rows``, whether the camera sees dome fog, and the camera sensor
+        temperature; returns "on", "off" or "auto" (hand back to the board)
+        when the heater should switch, else None.
         """
         c = self.cfg
         why = self._reasons(data, fog)
@@ -125,7 +138,7 @@ class DewGuard:
             if not why:
                 return None
             self.since = data.time
-            heat, txt = self._regulate(data, sun_up, ccd)
+            heat, txt = self._regulate(data, ccd)
             return self.switch("manual", heat, f"{'; '.join(why)}; {txt}")
         recent = [r["rh_ext"] for r in rows
                   if data.time - SETTLE_WINDOW <= r.get("time", -math.inf) <= data.time
@@ -135,7 +148,7 @@ class DewGuard:
         if settled and not why:
             return self.switch("auto", False,
                                 f"outside humidity {data.rh_ext:.0f} %")
-        heat, txt = self._regulate(data, sun_up, ccd)
+        heat, txt = self._regulate(data, ccd)
         demand = "; ".join(why) or f"outside humidity {data.rh_ext:.0f} %"
         if heat != self.heat:
             return self.switch("manual", heat, f"{txt} ({demand})")

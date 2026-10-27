@@ -14,34 +14,41 @@ def test_humid_night_heats_then_hands_back_when_dry():
     cfg = BoardConfig()
     guard = DewGuard(cfg)
     rows, switches = [], []
-    for i in range(240):                    # 2 h at 30 s, humidity climbing 25 -> 80 %
+    for i in range(240):                    # 2 h at 30 s, humidity climbing 25 -> 95 %
         t = 30.0 * i
-        rh = 25 + 55 * i / 240
+        rh = 25 + 70 * i / 240
         rows.append({"time": t, "rh_ext": rh})
         s = guard.update(reading(t, 8.0, rh, heater=guard.on), rows)
         if s is not None:
             switches.append((t, s, rh))
-    assert switches[0][1] == "on" and switches[0][2] >= cfg.dew_rh
+    # taken over at 60 %, but the inside (11 C) is well above the dew point
+    # (0.6 C) + 6 C: the heater only comes on once that reaches it, above 80 %
+    assert switches[0][1] == "off" and cfg.dew_rh <= switches[0][2] < cfg.dew_rh + 1
+    assert switches[1][1] == "on" and switches[1][2] > 80
     assert ">= 60 %" in guard.reason
     # now drying out: hands back once it has been below 60 % for 10 min
     t0 = rows[-1]["time"]
     for i in range(1, 240):
         t = t0 + 30.0 * i
-        rh = max(30.0, 80 - i)
+        rh = max(30.0, 95 - i)
         rows.append({"time": t, "rh_ext": rh})
         s = guard.update(reading(t, 8.0, rh, heater=guard.on), rows)
         if s is not None:
             switches.append((t, s, rh))
-    assert [s for _, s, _ in switches] == ["on", "auto"]
-    assert switches[1][2] <= cfg.dew_rh - 20    # 20 readings below 60 %
+    assert [s for _, s, _ in switches] == ["off", "on", "off", "auto"]
+    assert switches[-1][2] <= cfg.dew_rh - 20   # 20 readings below 60 %
 
 
 def test_cold_dome_near_dew_point_heats():
     guard = DewGuard(BoardConfig())
     # steady 55 %, but the ring has radiated down to within 4 C of the dew point
-    data = reading(0.0, 5.0, 55.0, hot=-0.5)
+    data = reading(0.0, 5.0, 55.0, hot=-0.5, inside=-3.0)
     assert guard.update(data, []) == "on"
     assert "heater ring" in guard.reason
+    # with the inside already 6 C above the dew point it takes the heater but holds it off
+    guard = DewGuard(BoardConfig())
+    assert guard.update(reading(0.0, 5.0, 55.0, hot=-0.5), []) == "off"
+    assert guard.state == "manual"
 
 
 def test_dry_steady_night_stays_off():
@@ -58,24 +65,32 @@ def test_dropped_heater_is_forced_again_once_the_ring_cools():
     assert not guard.dropped(reading(60.0, 8.0, 99.0, hot=35.2))   # firmware cut-out
     assert guard.dropped(reading(90.0, 8.0, 99.0, hot=12.0))
     # the reason logged on re-forcing is the current humidity, not the switch-on one
-    assert guard.update(reading(120.0, 8.0, 76.0, hot=12.0), []) is None
-    assert guard.reason == "inside +3.0 C on outside, target +7.0 C (outside humidity 76 % >= 60 %)"
-    assert guard.update(reading(150.0, 8.0, 55.0, hot=12.0), []) is None
+    assert guard.update(reading(120.0, 8.0, 76.0, hot=12.0, inside=2.0), []) is None
+    assert guard.reason == ("inside 10.0 C, target 10.0 C (dew point 4.0 C) "
+                            "(outside humidity 76 % >= 60 %)")
+    assert guard.update(reading(150.0, 8.0, 55.0, hot=12.0, inside=2.0), []) == "off"
     assert guard.reason.endswith("(outside humidity 55 %)")
 
 
-def test_regulates_inside_offset_day_and_night():
+def test_regulates_inside_above_dew_point_and_freezing():
     guard = DewGuard(BoardConfig())
+    # 4 C, 92 %: dew point 2.8 C, so hold the inside at 8.8 C
     assert guard.update(reading(0.0, 4.0, 92.0, inside=3.0), []) == "on"
-    assert "target +7.0 C" in guard.reason
-    assert guard.update(reading(30.0, 4.0, 92.0, inside=7.2, heater=True), []) is None  # in band
-    assert guard.update(reading(60.0, 4.0, 92.0, inside=7.6, heater=True), []) == "off"
+    assert "target 8.8 C (dew point 2.8 C)" in guard.reason
+    assert guard.update(reading(30.0, 4.0, 92.0, inside=5.2, heater=True), []) is None  # in band
+    assert guard.update(reading(60.0, 4.0, 92.0, inside=5.4, heater=True), []) == "off"
     assert guard.state == "manual"          # forced off, not handed to the board
-    assert guard.update(reading(90.0, 4.0, 92.0, inside=6.8), []) is None
-    assert guard.update(reading(120.0, 4.0, 92.0, inside=6.4), []) == "on"
-    # Sun up: a 5 C target, and sunshine alone keeps the inside above it
-    assert guard.update(reading(150.0, 4.0, 92.0, inside=6.4, heater=True), [], sun_up=True) == "off"
-    assert guard.update(reading(180.0, 4.0, 92.0, inside=4.4), [], sun_up=True) == "on"
+    assert guard.update(reading(90.0, 4.0, 92.0, inside=4.4), []) is None
+    assert guard.update(reading(120.0, 4.0, 92.0, inside=4.2), []) == "on"
+    # a cold, dry winter night: dew point -25 C, but keep the inside above 1 C
+    guard = DewGuard(BoardConfig())
+    assert guard.update(reading(0.0, -10.0, 30.0, inside=3.0), []) == "on"
+    assert guard.reason.startswith("outside -10.0 C < 1 C; inside -7.0 C, target 1.0 C")
+    assert guard.update(reading(30.0, -10.0, 30.0, inside=11.6, heater=True), []) == "off"
+    # it keeps the heater while it is freezing outside, however dry
+    for i in range(2, 200):
+        assert guard.update(reading(30.0 * i, -10.0, 30.0, inside=11.0), []) is None
+    assert guard.state == "manual"
 
 
 def test_ring_and_temperature_limits():
@@ -121,7 +136,7 @@ def test_one_low_reading_does_not_hand_back():
         rows.append({"time": t, "rh_ext": rh})
         return guard.update(reading(t, 6.0, rh, heater=guard.on), rows)
 
-    assert feed(0.0, 70.0) == "on"
+    assert feed(0.0, 70.0) is not None
     t = 0.0
     while t < 3600:                          # past the hold, humidity ~61 %
         t += 30.0
@@ -182,7 +197,7 @@ def test_dome_fog_flag_hysteresis_and_heater():
              for i, v in enumerate([1.0] * 20 + [0.15] + [math.nan] * 5 + [1.0] * 10)]
     assert flags.index(1) == 32                    # 30 min after the index reached 0.2
     guard = DewGuard(BoardConfig())
-    assert guard.update(reading(0.0, 8.0, 30.0), [], fog=True) == "on"
+    assert guard.update(reading(0.0, 8.0, 30.0, inside=-8.0), [], fog=True) == "on"
     assert guard.reason.startswith("fog on the dome; ")
 
 

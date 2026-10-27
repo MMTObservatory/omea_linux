@@ -105,9 +105,9 @@ class BoardConfig:
     dew_margin: float = 4.0         # degC, ...or with the unheated ring this near the dew point
     dew_hysteresis: float = 0.0     # %, stop below dew_rh minus this (for 10 min)
     dew_hold: float = 1800.0        # s, shortest heating spell
-    dew_offset_night: float = 7.0   # degC, while heating hold the inside this far above outside
-    dew_offset_day: float = 5.0     # degC, ...or this with the Sun up
-    dew_offset_band: float = 0.5    # degC, either side of it
+    dew_inside_margin: float = 6.0  # degC, while heating hold the inside this far above the dew point
+    dew_inside_min: float = 1.0     # degC, ...and at least this warm
+    dew_band: float = 0.5           # degC, either side of it
     dew_ring_max: float = 32.5      # degC, heater ring: off here (firmware cuts out ~35)
     dew_ring_resume: float = 30.0   # degC, ...on again below this
     dew_temp_max: float = 30.0      # degC, no heat with the inside or camera sensor above this

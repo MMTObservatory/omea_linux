@@ -734,9 +734,7 @@ class Monitor:
                     if cfg.board.heater_mode == "dew":
                         with self.status.lock:
                             rows = list(self.status.weather)
-                        sun_up = self.site.sun_altitude(self.clock.now()) > 0
-                        switch = self.dew.update(data, rows, fog=self.dome_fog, sun_up=sun_up,
-                                                 ccd=ccd)
+                        switch = self.dew.update(data, rows, fog=self.dome_fog, ccd=ccd)
                         if switch is not None:
                             self._force_heater(switch, self.dew.reason)
                         elif self.dew.dropped(data):
