@@ -74,14 +74,14 @@ def test_dropped_heater_is_forced_again_once_the_ring_cools():
 
 def test_regulates_inside_above_dew_point_and_freezing():
     guard = DewGuard(BoardConfig())
-    # 4 C, 92 %: dew point 2.8 C, so hold the inside at 8.8 C
-    assert guard.update(reading(0.0, 4.0, 92.0, inside=3.0), []) == "on"
-    assert "target 8.8 C (dew point 2.8 C)" in guard.reason
-    assert guard.update(reading(30.0, 4.0, 92.0, inside=5.2, heater=True), []) is None  # in band
-    assert guard.update(reading(60.0, 4.0, 92.0, inside=5.4, heater=True), []) == "off"
+    # 8 C, 76 %: dew point 4.0 C, so hold the inside at 10.0 C
+    assert guard.update(reading(0.0, 8.0, 76.0, inside=1.0), []) == "on"
+    assert "target 10.0 C (dew point 4.0 C)" in guard.reason
+    assert guard.update(reading(30.0, 8.0, 76.0, inside=2.0, heater=True), []) is None  # in band
+    assert guard.update(reading(60.0, 8.0, 76.0, inside=2.6, heater=True), []) == "off"
     assert guard.state == "manual"          # forced off, not handed to the board
-    assert guard.update(reading(90.0, 4.0, 92.0, inside=4.4), []) is None
-    assert guard.update(reading(120.0, 4.0, 92.0, inside=4.2), []) == "on"
+    assert guard.update(reading(90.0, 8.0, 76.0, inside=1.6), []) is None
+    assert guard.update(reading(120.0, 8.0, 76.0, inside=1.4), []) == "on"
     # a cold, dry winter night: dew point -25 C, but keep the inside above 1 C
     guard = DewGuard(BoardConfig())
     assert guard.update(reading(0.0, -10.0, 30.0, inside=3.0), []) == "on"
@@ -91,6 +91,31 @@ def test_regulates_inside_above_dew_point_and_freezing():
     for i in range(2, 200):
         assert guard.update(reading(30.0 * i, -10.0, 30.0, inside=11.0), []) is None
     assert guard.state == "manual"
+
+
+def test_stays_on_when_humid_or_fogged_whatever_the_inside_reads():
+    # 2026-11-04: fog at 90 %, with 2 min on / 4 min off holding the inside on target
+    guard = DewGuard(BoardConfig())
+    warm = dict(inside=12.0, hot=12.0)          # far above dew point + 6 C
+    assert guard.update(reading(0.0, 5.0, 84.0, **warm), []) == "off"
+    assert guard.update(reading(30.0, 5.0, 85.0, **warm), []) == "on"
+    assert "held on: outside humidity 85 %" in guard.reason
+    assert guard.update(reading(60.0, 5.0, 92.0, heater=True, **warm), []) is None
+    assert not guard.dropped(reading(60.0, 5.0, 92.0, heater=True, **warm))
+    assert guard.dropped(reading(90.0, 5.0, 92.0, **warm))     # re-forced if the board drops it
+    # humidity noise around the threshold doesn't switch it
+    assert guard.update(reading(90.0, 5.0, 81.0, heater=True, **warm), []) is None
+    assert guard.update(reading(120.0, 5.0, 79.0, heater=True, **warm), []) == "off"
+    # fog holds it on at any humidity above the takeover, and not after it clears
+    assert guard.update(reading(150.0, 5.0, 70.0, **warm), [], fog=True) == "on"
+    assert "held on: fog on the dome" in guard.reason
+    assert guard.update(reading(180.0, 5.0, 70.0, heater=True, **warm), [], fog=True) is None
+    assert guard.update(reading(210.0, 5.0, 70.0, heater=True, **warm), []) == "off"
+    # the limits still win
+    assert guard.update(reading(240.0, 5.0, 92.0, **warm), []) == "on"
+    assert guard.update(reading(270.0, 5.0, 92.0, heater=True, inside=12.0, hot=32.6), []) == "off"
+    assert guard.update(reading(300.0, 5.0, 92.0, inside=12.0, hot=29.5), [], fog=True) == "on"
+    assert guard.update(reading(330.0, 5.0, 92.0, heater=True, inside=25.5), [], fog=True) == "off"
 
 
 def test_ring_and_temperature_limits():

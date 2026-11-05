@@ -20,10 +20,19 @@ switched off before the board gets it back: its automatic mode leaves a heater
 it finds on running.
 
 While it has the heater it regulates rather than heating flat out: the inside
-of the housing (a good proxy for the dome) is held ``dew_inside_margin`` above
+of the housing is held ``dew_inside_margin`` above
 the dew point, but no colder than ``dew_inside_min``, within ``dew_band``
 either way. The inside usually sits a few C above the outside air unheated,
-so at moderate humidity the heater mostly stays off. It is also off
+so at moderate humidity the heater mostly stays off.
+
+The inside is not the dome, though: its sensor follows the ring within minutes,
+so that setpoint switches the heater off after 2 min on, long before the dome
+warms, and on 2026-11-04 the dome fogged at 90 % that way with the inside on
+target. So the heater stays on, whatever the inside reads, while the camera
+sees fog or the outside humidity is at least ``dew_rh_hold`` (until it is
+``RH_RESUME`` below that).
+
+The limits come before all of that. The heater is off
 
 * once the heater ring reaches ``dew_ring_max``, until it is below
   ``dew_ring_resume`` (the firmware drops a forced heater for good at ~35 C), and
@@ -38,6 +47,7 @@ import math
 
 TEMP_RESUME = 1.0           # C below dew_temp_max to heat again
 SETTLE_WINDOW = 600.0       # s the humidity must stay low before handing back
+RH_RESUME = 5.0             # % below dew_rh_hold to regulate again
 
 
 class DewGuard:
@@ -51,6 +61,7 @@ class DewGuard:
         self.reason = ""
         self.ring_hot = False
         self.too_warm = False
+        self.humid = False                  # outside humidity at dew_rh_hold
         self._undo = ("auto", False)
 
     @property
@@ -95,7 +106,7 @@ class DewGuard:
         dew = data.dew_point if math.isfinite(data.dew_point) else -math.inf
         return max(dew + c.dew_inside_margin, c.dew_inside_min)
 
-    def _regulate(self, data, ccd):
+    def _regulate(self, data, ccd, fog=False):
         """Whether the heater should be on while regulating, and why."""
         c = self.cfg
         if data.temp_hot >= c.dew_ring_max:
@@ -107,6 +118,10 @@ class DewGuard:
             self.too_warm = True
         elif warmest <= c.dew_temp_max - TEMP_RESUME:
             self.too_warm = False
+        if data.rh_ext >= c.dew_rh_hold:
+            self.humid = True
+        elif data.rh_ext < c.dew_rh_hold - RH_RESUME:
+            self.humid = False
         target = self.target(data)
         txt = (f"inside {data.temp_int:.1f} C, target {target:.1f} C "
                f"(dew point {data.dew_point:.1f} C)")
@@ -115,6 +130,11 @@ class DewGuard:
             return False, f"inside {data.temp_int:.1f} C{sensor}, limit {c.dew_temp_max:.0f} C"
         if self.ring_hot:
             return False, f"heater ring {data.temp_hot:.1f} C, limit {c.dew_ring_max:.1f} C"
+        if fog:
+            return True, f"{txt}; held on: fog on the dome"
+        if self.humid:
+            return True, (f"{txt}; held on: outside humidity {data.rh_ext:.0f} % "
+                          f"(from {c.dew_rh_hold:.0f} %)")
         if data.temp_int < target - c.dew_band:
             return True, txt
         if data.temp_int > target + c.dew_band:
@@ -138,7 +158,7 @@ class DewGuard:
             if not why:
                 return None
             self.since = data.time
-            heat, txt = self._regulate(data, ccd)
+            heat, txt = self._regulate(data, ccd, fog)
             return self.switch("manual", heat, f"{'; '.join(why)}; {txt}")
         recent = [r["rh_ext"] for r in rows
                   if data.time - SETTLE_WINDOW <= r.get("time", -math.inf) <= data.time
@@ -148,7 +168,7 @@ class DewGuard:
         if settled and not why:
             return self.switch("auto", False,
                                 f"outside humidity {data.rh_ext:.0f} %")
-        heat, txt = self._regulate(data, ccd)
+        heat, txt = self._regulate(data, ccd, fog)
         demand = "; ".join(why) or f"outside humidity {data.rh_ext:.0f} %"
         if heat != self.heat:
             return self.switch("manual", heat, f"{txt} ({demand})")
