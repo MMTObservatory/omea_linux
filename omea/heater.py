@@ -28,9 +28,16 @@ so at moderate humidity the heater mostly stays off.
 The inside is not the dome, though: its sensor follows the ring within minutes,
 so that setpoint switches the heater off after 2 min on, long before the dome
 warms, and on 2026-11-04 the dome fogged at 90 % that way with the inside on
-target. So the heater stays on, whatever the inside reads, while the camera
-sees fog or the outside humidity is at least ``dew_rh_hold`` (until it is
-``RH_RESUME`` below that).
+target. So the heater stays on, whatever the inside reads, while
+
+* the camera sees fog,
+* the outside humidity is at least ``dew_rh_hold`` (until it is ``RH_RESUME``
+  below that), or
+* the ring was within ``dew_margin`` of the dew point when last unheated. A
+  heated ring says nothing about the dome, so from then on the outside air
+  stands in for it, less the gap the ring showed when this began (when humid
+  the unheated ring is within about 1 C of the air), until that estimate is
+  ``RING_RELEASE`` clear of the margin.
 
 The limits come before all of that. The heater is off
 
@@ -48,6 +55,7 @@ import math
 TEMP_RESUME = 1.0           # C below dew_temp_max to heat again
 SETTLE_WINDOW = 600.0       # s the humidity must stay low before handing back
 RH_RESUME = 5.0             # % below dew_rh_hold to regulate again
+RING_RELEASE = 1.5          # C beyond dew_margin to stop holding for the ring
 
 
 class DewGuard:
@@ -62,6 +70,8 @@ class DewGuard:
         self.ring_hot = False
         self.too_warm = False
         self.humid = False                  # outside humidity at dew_rh_hold
+        self.ring_near = False              # unheated ring near the dew point
+        self.ring_gap = 0.0                 # C the air was above the ring then
         self._undo = ("auto", False)
 
     @property
@@ -83,6 +93,17 @@ class DewGuard:
         self.state, self.heat, self.reason = state, heat, reason
         return "auto" if state == "auto" else ("on" if heat else "off")
 
+    def _watch_ring(self, data):
+        """Latch ring_near; the ring only stands for the dome while unheated."""
+        c = self.cfg
+        if not data.heater_on and data.temp_hot - data.dew_point <= c.dew_margin:
+            if not self.ring_near:
+                self.ring_gap = max(data.temp_ext - data.temp_hot, 0.0)
+            self.ring_near = True
+        elif (data.temp_ext - self.ring_gap - data.dew_point
+              > c.dew_margin + RING_RELEASE):
+            self.ring_near = False
+
     def _reasons(self, data, fog):
         c = self.cfg
         why = []
@@ -90,9 +111,9 @@ class DewGuard:
             why.append("fog on the dome")
         if data.rh_ext >= c.dew_rh:
             why.append(f"outside humidity {data.rh_ext:.0f} % >= {c.dew_rh:.0f} %")
-        # the ring only stands for the dome while it is not being heated
-        if not data.heater_on and data.temp_hot - data.dew_point <= c.dew_margin:
-            why.append(f"heater ring {data.temp_hot:.1f} C within {c.dew_margin:.1f} C "
+        if self.ring_near:
+            where = f"{data.temp_hot:.1f} C" if not data.heater_on else "unheated"
+            why.append(f"heater ring {where} within {c.dew_margin:.1f} C "
                        f"of the dew point {data.dew_point:.1f} C")
         coldest = min(data.temp_ext, data.temp_int)
         if coldest < c.dew_inside_min:
@@ -135,6 +156,8 @@ class DewGuard:
         if self.humid:
             return True, (f"{txt}; held on: outside humidity {data.rh_ext:.0f} % "
                           f"(from {c.dew_rh_hold:.0f} %)")
+        if self.ring_near:
+            return True, f"{txt}; held on: heater ring near the dew point"
         if data.temp_int < target - c.dew_band:
             return True, txt
         if data.temp_int > target + c.dew_band:
@@ -153,6 +176,7 @@ class DewGuard:
         when the heater should switch, else None.
         """
         c = self.cfg
+        self._watch_ring(data)
         why = self._reasons(data, fog)
         if self.state == "auto":
             if not why:

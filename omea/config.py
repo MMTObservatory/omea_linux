@@ -108,7 +108,7 @@ class BoardConfig:
     dew_inside_margin: float = 6.0  # degC, while heating hold the inside this far above the dew point
     dew_inside_min: float = 1.0     # degC, ...and at least this warm
     dew_band: float = 0.5           # degC, either side of it
-    dew_rh_hold: float = 85.0       # %, heater stays on above this outside humidity, as with dome fog
+    dew_rh_hold: float = 85.0       # %, heater stays on above this outside humidity, as with dome fog or a ring near the dew point
     dew_ring_max: float = 32.5      # degC, heater ring: off here (firmware cuts out ~35)
     dew_ring_resume: float = 30.0   # degC, ...on again below this
     dew_temp_max: float = 30.0      # degC, no heat with the inside or camera sensor above this

@@ -22,9 +22,9 @@ def test_humid_night_heats_then_hands_back_when_dry():
         if s is not None:
             switches.append((t, s, rh))
     # taken over at 60 %, but the inside (11 C) is well above the dew point
-    # (0.6 C) + 6 C: the heater only comes on once that reaches it, above 80 %
+    # (0.6 C) + 6 C: the heater only comes on with the ring (6.5 C) within 4 C of it
     assert switches[0][1] == "off" and cfg.dew_rh <= switches[0][2] < cfg.dew_rh + 1
-    assert switches[1][1] == "on" and switches[1][2] > 80
+    assert switches[1][1] == "on" and 65 < switches[1][2] < 70
     assert ">= 60 %" in guard.reason
     # now drying out: hands back once it has been below 60 % for 10 min
     t0 = rows[-1]["time"]
@@ -45,10 +45,39 @@ def test_cold_dome_near_dew_point_heats():
     data = reading(0.0, 5.0, 55.0, hot=-0.5, inside=-3.0)
     assert guard.update(data, []) == "on"
     assert "heater ring" in guard.reason
-    # with the inside already 6 C above the dew point it takes the heater but holds it off
+    # the inside already 6 C above the dew point makes no difference
     guard = DewGuard(BoardConfig())
-    assert guard.update(reading(0.0, 5.0, 55.0, hot=-0.5), []) == "off"
-    assert guard.state == "manual"
+    assert guard.update(reading(0.0, 5.0, 55.0, hot=-0.5), []) == "on"
+    assert "held on: heater ring near the dew point" in guard.reason
+
+
+def test_ring_near_dew_point_holds_on_until_the_air_is_clear_of_it():
+    guard = DewGuard(BoardConfig())
+    # 2026-11-04 22:00: 5.5 C, 80 %, ring 0.9 C under the air, 2.2 C above the dew point
+    dew = board.dew_point(5.5, 80.0)
+    assert 2.0 < dew < 2.4
+    assert guard.update(reading(0.0, 5.5, 80.0, hot=4.6, inside=2.8), []) == "on"
+    assert guard.ring_gap == 5.5 - 4.6
+    # heated, the ring and inside read well clear; it stays on regardless
+    for i in range(1, 60):
+        assert guard.update(reading(30.0 * i, 5.5, 80.0, hot=20.0, inside=8.0, heater=True),
+                            []) is None
+    assert "heater ring unheated within 4.0 C" in guard.reason
+    # air 5.8 C above the dew point: the ring estimate is 4.9 C above it, within 5.5 C
+    assert guard.update(reading(1800.0, 8.0, 67.0, hot=20.0, inside=8.0, heater=True),
+                        []) is None
+    # dry enough that the estimate clears the margin by 1.5 C
+    assert guard.update(reading(1830.0, 8.0, 60.0, hot=20.0, inside=8.0, heater=True),
+                        []) == "off"
+    assert not guard.ring_near
+    # still warm from the heater: not near the dew point yet; cold again: near
+    assert guard.update(reading(1860.0, 8.0, 80.0, hot=20.0, inside=8.0), []) is None
+    assert not guard.ring_near
+    assert guard.update(reading(1890.0, 8.0, 80.0, hot=6.0, inside=8.0), []) == "on"
+    assert guard.ring_gap == 2.0
+    # the limits still win
+    assert guard.update(reading(1920.0, 8.0, 80.0, hot=32.6, inside=8.0, heater=True),
+                        []) == "off"
 
 
 def test_dry_steady_night_stays_off():
@@ -60,7 +89,7 @@ def test_dry_steady_night_stays_off():
 
 def test_dropped_heater_is_forced_again_once_the_ring_cools():
     guard = DewGuard(BoardConfig())
-    assert guard.update(reading(0.0, 8.0, 99.0), []) == "on"
+    assert guard.update(reading(0.0, 8.0, 99.0, hot=12.0), []) == "on"
     assert not guard.dropped(reading(30.0, 8.0, 99.0, hot=20.0, heater=True))
     assert not guard.dropped(reading(60.0, 8.0, 99.0, hot=35.2))   # firmware cut-out
     assert guard.dropped(reading(90.0, 8.0, 99.0, hot=12.0))
@@ -75,13 +104,13 @@ def test_dropped_heater_is_forced_again_once_the_ring_cools():
 def test_regulates_inside_above_dew_point_and_freezing():
     guard = DewGuard(BoardConfig())
     # 8 C, 76 %: dew point 4.0 C, so hold the inside at 10.0 C
-    assert guard.update(reading(0.0, 8.0, 76.0, inside=1.0), []) == "on"
+    assert guard.update(reading(0.0, 8.0, 76.0, inside=1.0, hot=12.0), []) == "on"
     assert "target 10.0 C (dew point 4.0 C)" in guard.reason
-    assert guard.update(reading(30.0, 8.0, 76.0, inside=2.0, heater=True), []) is None  # in band
-    assert guard.update(reading(60.0, 8.0, 76.0, inside=2.6, heater=True), []) == "off"
+    assert guard.update(reading(30.0, 8.0, 76.0, inside=2.0, heater=True, hot=12.0), []) is None  # in band
+    assert guard.update(reading(60.0, 8.0, 76.0, inside=2.6, heater=True, hot=12.0), []) == "off"
     assert guard.state == "manual"          # forced off, not handed to the board
-    assert guard.update(reading(90.0, 8.0, 76.0, inside=1.6), []) is None
-    assert guard.update(reading(120.0, 8.0, 76.0, inside=1.4), []) == "on"
+    assert guard.update(reading(90.0, 8.0, 76.0, inside=1.6, hot=12.0), []) is None
+    assert guard.update(reading(120.0, 8.0, 76.0, inside=1.4, hot=12.0), []) == "on"
     # a cold, dry winter night: dew point -25 C, but keep the inside above 1 C
     guard = DewGuard(BoardConfig())
     assert guard.update(reading(0.0, -10.0, 30.0, inside=3.0), []) == "on"

@@ -63,7 +63,8 @@ port = "/dev/ttyUSB0"              # the FTDI RS232 adapter (Windows COM3)
 # dew_inside_margin = 6.0           # (C), but no colder than
 # dew_inside_min = 1.0              # (C)
 # dew_band = 0.5                    # either side,
-# but it stays on while the camera sees dome fog, or the outside humidity is above
+# but it stays on while the camera sees dome fog, the unheated ring is within
+# dew_margin of the dew point, or the outside humidity is above
 # dew_rh_hold = 85.0                # (%; until 5 % below this)
 # dew_ring_max = 32.5               # heater ring off here (C; firmware cuts out ~35),
 # dew_ring_resume = 30.0            # ...on again below this
