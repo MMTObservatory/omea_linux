@@ -116,15 +116,18 @@ class BoardConfig:
 
 @dataclass
 class OutputConfig:
-    data_dir: str = "/mnt/d/skycam"        # <data_dir>/<YYYY-MM-DD>/...
+    # <data_dir>/<YYYY-MM-DD>/...; it must exist (the data drive mounted):
+    # `omea run` will not create it
+    data_dir: str = "/data/skycam"
     write_fits: bool = True
     write_jpeg: bool = True
     write_unwrap: bool = True
     jpeg_quality: int = 98
     latest_dir: str = "/var/www/html/skycam"   # ImageLastFTP_AllSKY*.jpg
     latest_interval: float = 30.0
-    weather_csv: str = "/mnt/c/Users/skycam/Documents/skywatch/Heater/DataOut_Weather.csv"
-    telescope_file: str = "/mnt/d/skycam/mmt_position.txt"
+    # Skywatch's weather log, with its history (C:\Users\skycam\Documents\... under Windows)
+    weather_csv: str = "/home/skycam/Documents/skywatch/Heater/DataOut_Weather.csv"
+    telescope_file: str = "/data/skycam/mmt_position.txt"
     unwrap_scale: float = 1.5      # Skywatch Unwrap Scale = 150 (%)
 
 
@@ -139,7 +142,7 @@ class ScienceConfig:
     # after every frame (interval 0) or at most every extinction_interval s
     extinction_frames: int = 10
     extinction_interval: float = 0.0
-    extinction_file: str = "/mnt/d/skycam/alcor_extinction_latest.fits"
+    extinction_file: str = "/data/skycam/alcor_extinction_latest.fits"
     # over this share of stars lost (fog), publish extinction_opaque instead of
     # a median of the few left
     extinction_opaque_fraction: float = 0.9

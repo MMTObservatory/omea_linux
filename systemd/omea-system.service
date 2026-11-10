@@ -1,0 +1,27 @@
+# omea as a system service, for a native Linux host (Debian 13).
+#   sudo cp systemd/omea-system.service /etc/systemd/system/omea.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now omea
+# (systemd/omea.service is the user service used under WSL2.)
+[Unit]
+Description=OMEA all-sky camera (replaces Alcor Skywatch)
+After=network-online.target time-sync.target
+Wants=network-online.target
+# the archive drive: don't start without it
+RequiresMountsFor=/data
+
+[Service]
+Type=simple
+User=skycam
+Group=skycam
+SupplementaryGroups=dialout
+WorkingDirectory=/home/skycam/omea_linux
+# REDISPW=... here if redis ever needs a password
+EnvironmentFile=-/home/skycam/.config/omea/env
+ExecStart=/home/skycam/conda/envs/skycam/bin/omea -c /home/skycam/omea_linux/config.toml run
+Restart=on-failure
+RestartSec=30
+# the cooler is switched off on a clean stop; give a 20 s exposure time to end
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

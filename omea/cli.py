@@ -43,6 +43,10 @@ def cmd_run(cfg, args):
         clock = SimClock(start, args.speed)
     elif args.data_dir:
         cfg.output.data_dir = args.data_dir
+    if not args.simulate and not Path(cfg.output.data_dir).is_dir():
+        # the data drive is not mounted: writing would fill the system disk
+        sys.exit(f"omea: data directory {cfg.output.data_dir} does not exist "
+                 "(is the data drive mounted?); not starting")
     if args.no_redis:
         cfg.redis.enabled = False
     if args.no_science:

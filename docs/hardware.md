@@ -91,7 +91,7 @@ does not care which.
    ```bash
    omea iris 16
    omea snap --exposure 0.005 --gain 0 --fratio 16 -o new.fits.bz2 --raw new_raw.npy
-   omea check-geometry new.fits.bz2 /mnt/d/skycam/<day>/<last Skywatch frame>.fits.bz2
+   omea check-geometry new.fits.bz2 <data_dir>/<day>/<last Skywatch frame>.fits.bz2
    ```
 
    It must say `OK: same orientation, no shift`. It also prints the bias: it

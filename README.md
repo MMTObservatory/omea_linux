@@ -16,7 +16,8 @@ visualization.
 * **Skywatch-compatible frames.** Each RAW16 frame becomes the same
   (3, 1411, 1422) int16 cube Skywatch saved: same crop, demosaic, 2x2 binning,
   mirror and clipping, with the same FITS header, file names and noon-to-noon
-  directories (`/mnt/d/skycam/YYYY-MM-DD/YYYY_MM_DD__HH_MM_SS.fits.bz2`).
+  directories (`<data_dir>/YYYY-MM-DD/YYYY_MM_DD__HH_MM_SS.fits.bz2`; `data_dir`
+  is `/data/skycam` by default, `/mnt/d/skycam` on the current WSL host).
   Every skycam_utils calibration (WCS epochs, bad-pixel and horizon masks,
   zeropoints) stays valid. [docs/skywatch.md](docs/skywatch.md) explains how
   the format was recovered.
@@ -76,7 +77,8 @@ The ZWO SDK library (`lib/libASICamera2.so.1.37`, from ZWO's Linux SDK in this
 directory) is found automatically. See [docs/hardware.md](docs/hardware.md) for
 attaching the camera and serial adapter to Linux (usbipd under WSL2), and the
 first-light checklist. [docs/migration.md](docs/migration.md) is the step-by-step
-guide to rebuilding the host on native Debian 13.
+guide to rebuilding the host on native Debian 13, with a map of every path
+that changes; the system service for it is `systemd/omea-system.service`.
 
 ## Use
 
@@ -88,7 +90,7 @@ omea -c config.toml run               # the real thing
 
 # a dry run: replays a night of Skywatch frames through the whole pipeline,
 # 30x faster, writing only under ./data (no redis)
-omea run --simulate --archive /mnt/d/skycam/2026-10-09 --start 2026-10-10T01:20 --speed 30
+omea run --simulate --archive /data/skycam/2026-10-09 --start 2026-10-10T01:20 --speed 30
 
 # hardware utilities: they need the board/camera, so stop the service first
 # (systemctl --user stop omea). The service writes the [board] heater_* settings
