@@ -1,85 +1,117 @@
-# Moving from WSL2 to native Debian
+# Bringing OMEA up on Debian 13
 
-How to move the OMEA host (`new-skycam`, an Intel NUC11PAHi7) from Windows 11
-+ WSL2 (Ubuntu 24.04) to Debian running directly on the hardware. omea itself
-does not care which: the changes are in the plumbing around it. The data drive
-is the one part that needs a decision; see [The data drive](#the-data-drive).
+A self-contained handoff for rebuilding the OMEA all-sky camera host
+(`new-skycam`) from a fresh Debian 13 (trixie) install, replacing Windows 11 +
+WSL2. omea itself does not care which it runs on: everything here is plumbing.
 
-## What the host runs now
+Read [Back up first](#1-back-up-first) before touching the machine: wiping
+the NVMe is one-way, and several things that matter are not in git.
 
-Surveyed on 2026-10-17.
+The host was last surveyed on 2026-11-09 (Ubuntu 24.04 under WSL 3.0.5,
+usbipd-win 5.3).
 
-| Piece | Now (WSL2) | Native Debian |
+## What the system is
+
+| Piece | Today (WSL2) | On Debian |
 |---|---|---|
-| Machine | NUC11PAHi7, 32 GB, Lexar 1 TB NVMe (`C:`), Windows 11 Pro | same hardware; Debian on the NVMe |
-| Data drive | WD Elements 18 TB USB, GPT, one NTFS partition "Skycam Data" (`D:`), BitLocker off, 10 TB used / 8.1 TB free; seen as `/mnt/d` through drvfs (9p) | mounted directly; keep it at `/mnt/d` (see below) |
-| Camera, serial board | usbipd-win on Windows attaches them to WSL (`windows/omea-usbip.ps1` in the Startup folder) | plain USB; udev rule and `dialout` group |
-| Start-up | Windows log-in starts WSL, then `systemd --user` (linger) starts `omea` | systemd at boot |
-| omea | `~/.config/systemd/user/omea.service`, conda env `~/conda/envs/skycam` (Python 3.14), `~/omea_linux`, `~/skycam-utils` (editable) | same, or a system service (recommended, see below) |
-| cron (user `skycam`) | `latest_movie.sh` every minute; `daily_movies.sh` 13:15 (movies, `alcor_process_night`, keograms) | same crontab |
-| Web | lighttpd on 80 and 443 (`/etc/lighttpd/server.pem`, `mod_userdir` for `~/public_html`), `/var/www/html/skycam` with symlinks `archive -> /mnt/d/skycam` and `movies -> /mnt/d/skycam/movies`; omea's status page on 8081 | same packages and files |
-| Network | WSL `networkingMode=mirrored` shares Windows' interface: Ethernet (Intel I225-V) static 128.196.100.174/24, gateway 128.196.100.1, DNS 128.196.100.19 and 8.8.8.8 | the same static address on the I225-V (`igc` driver) |
-| Clock | WSL follows the Windows clock; Windows Time is stopped (manual start) and the WSL clock is **1.05 s slow** (vs mmt-ntp, pool.ntp.org and time.google.com) | chrony against `mmt-ntp.mmto.arizona.edu` |
-| SSH | `ssh.socket`, `~/.ssh/authorized_keys` | openssh-server, same keys |
-| Weather log | `DataOut_Weather.csv` on `C:` (Skywatch's path, 187 MB of history back to 2024) | move it to the data drive |
+| Machine | Intel NUC11PAHi7, 32 GB, Lexar 1 TB NVMe (`C:`), Windows 11 Pro | same hardware; Debian on the NVMe |
+| Camera | ZWO ASI294MC Pro, USB 3, `03c3:294f`, through usbipd-win | plain USB; `lib/99-asi.rules` |
+| Sensor board | Alcor board behind an FTDI FT231X RS232 adapter, `0403:6015`, `/dev/ttyUSB0` (Windows COM3) | the same `/dev/ttyUSB0`; `dialout` group |
+| Data drive | WD Elements 18 TB USB (`1058:25a3`), one NTFS partition "Skycam Data" (`D:`), BitLocker off; 9.8 TB used, 6.7 TB free; `/mnt/d` via drvfs | mounted directly at `/mnt/d` (see [The data drive](#the-data-drive)) |
+| Network | WSL `networkingMode=mirrored`: Ethernet (Intel I225-V) static 128.196.100.174/24, gateway 128.196.100.1, DNS 128.196.100.19 and 8.8.8.8 | the same static address on the I225-V (`igc` driver) |
+| Start-up | Windows log-in, then the Startup folder starts WSL and `windows/omea-usbip.ps1` (the USB watchdog); `systemd --user` with linger starts `omea` | systemd at boot, a system service |
+| omea | `~/omea_linux` ([MMTObservatory/omea_linux](https://github.com/MMTObservatory/omea_linux)), user service `~/.config/systemd/user/omea.service`, config `~/omea_linux/config.toml` | same checkout and config; system service |
+| skycam_utils | `~/skycam-utils` ([tepickering/skycam-utils](https://github.com/tepickering/skycam-utils)), installed editable | same |
+| Python | Miniforge in `~/conda` (conda 26.10), env `skycam`: Python 3.14.10, numpy 2.5.4, astropy 8.0.1, scipy 1.18.1, photutils 3.0.0, matplotlib 3.11.2, scikit-image 0.26.0, pandas 3.0.5, reproject 0.21.0, pillow 13.0.0, pyserial 3.5, redis 8.1.0 | same |
+| cron (user `skycam`) | `latest_movie.sh` every minute (last 150 JPEGs, to `latest_movie.mp4`); `daily_movies.sh` at 13:15 (yesterday's movies, `alcor_process_night`, keograms) | same crontab |
+| Web | lighttpd on 80 and 443 (`/etc/lighttpd/server.pem`; dir-listing, ssl, userdir enabled), `/var/www/html/skycam` (owned by `skycam`) with symlinks `archive -> /mnt/d/skycam` and `movies -> /mnt/d/skycam/movies`; omea's status page on 8081 | same packages and files |
+| Redis | publishes to `redis.mmto.arizona.edu` with no password (`REDISPW` unset, no `~/.config/omea/env`) | same |
+| Clock | follows Windows; ~1 s slow when last checked | chrony against `mmt-ntp.mmto.arizona.edu` |
+| Weather log | omea appends `DataOut_Weather.csv` to Skywatch's old path, `C:\Users\skycam\Documents\skywatch\Heater\` (192 MB, history back to 2024), because `config.toml` doesn't set `weather_csv` and that is the default | move it to `/mnt/d/skycam/` |
+| Git push | HTTPS remotes, credentials from Windows' Git Credential Manager | `gh auth login` (or SSH remotes) |
+| Monitoring | Nagios (elsewhere) warns when frames stop coming in; nothing runs on this host for it | unchanged if the hostname and address stay the same |
 
-The Windows side also holds Skywatch's own files
-(`C:\Users\skycam\Documents\skywatch`, 78 GB: dark frames, hot-pixel lists,
-logs, the `Heater` data). Nothing reads them now, but they are the only copy.
+Not worth carrying over: `pure-ftpd` (Skywatch's localhost FTP, unused),
+`postfix` (installed but never configured; cron's mail to it fails, harmlessly),
+`wireshark`, `iraf`, `saods9`, `~/wireshark.pcapng`, `~/errors.txt*`.
+
+## 1. Back up first
+
+Do this on the running system, onto the data drive, in daytime (the cooler is
+off then, and the dome heater runs from thresholds stored in the camera with no
+software at all).
+
+1. **Files not in git.** Both repos are pushed; check with `git status` in each.
+   The rest:
+
+   ```bash
+   B=/mnt/d/migration-backup && mkdir -p $B
+   cp ~/omea_linux/config.toml $B/
+   crontab -l > $B/crontab.txt
+   tar czf $B/home-extras.tgz -C ~ .ssh public_html .config/systemd .gitconfig \
+       .condarc .tmux.conf .emacs.d .ZWO .bash_history
+   cp ~/skycam-utils/scripts/position.txt ~/skycam-utils/skycam_utils/version.py $B/
+   tar czf $B/www.tgz -C /var/www/html skycam      # keeps the two symlinks as links
+   sudo tar czf $B/etc.tgz /etc/lighttpd /etc/udev/rules.d/99-asi.rules \
+       /etc/modprobe.d/usbfs.conf /etc/wsl.conf
+   ~/conda/bin/conda env export -n skycam > $B/skycam-env.yml
+   cp /mnt/c/Users/skycam/Documents/skywatch/Heater/DataOut_Weather.csv $B/
+   ```
+
+   `/etc/lighttpd/server.pem` is the HTTPS certificate and key, readable only
+   by root; it is in `etc.tgz`.
+2. **The whole WSL distro**, as a fallback (about 13 GB), from PowerShell:
+   `wsl --export Ubuntu D:\migration-backup\wsl-ubuntu.tar`. Stop the service
+   first (`systemctl --user stop omea`) so it isn't writing.
+3. **Windows files.** `C:\Users\skycam\Documents\skywatch` (78 GB: Skywatch's
+   dark frames, hot-pixel lists, logs and the `Heater` data) is the only copy;
+   copy it to `D:\migration-backup\skywatch\`, with anything else wanted from
+   `C:\Users`. If a return to Skywatch should stay possible, also export the
+   registry key `HKCU\Software\SkyWatch` (Skywatch's board settings). It holds
+   a localhost FTP password, so keep that file local and out of git.
+4. **A disk image of `C:`**, if a way back to Windows/Skywatch is wanted: boot
+   Clonezilla and save the NVMe to the data drive (~330 GB used, less
+   compressed). Without it, wiping the NVMe can't be undone.
+5. **Note the board's heater thresholds** (`omea board`, with the service
+   stopped). They live in the camera and survive anyway; it's a check for
+   afterwards.
+6. **Shut Windows down fully**, so the NTFS volume is clean. Fast Startup is on
+   (`HiberbootEnabled = 1`) and leaves volumes hibernated, which Linux won't
+   write to. From an admin prompt: `powercfg /h off`, then `shutdown /s /t 0`.
+   Not the Start-menu shutdown.
+
+Expect a dark gap of a few hours.
 
 ## The data drive
 
-`D:` is NTFS. Linux has two NTFS drivers:
-
-* **ntfs3**, in the kernel since 5.15 (Debian 13's kernel has it). Fast, low
-  CPU. Its record is shakier than ntfs-3g's (corruption reports in its first
-  years) and it is thinly maintained.
-* **ntfs-3g**, a FUSE driver, mature and conservative, but slower and heavier
-  on CPU. Fine for this load (a 10-25 MB frame every 15-35 s).
-
-What NTFS costs on Linux either way:
+`D:` is NTFS, which Linux reads and writes with either **ntfs3** (in the
+kernel; fast) or **ntfs-3g** (FUSE; slower, more conservative). Either is fine
+for this load: a 10-25 MB frame every 15-35 s. What NTFS costs on Linux:
 
 * **No real fsck.** `ntfsfix` only resets the journal and clears the dirty
-  flag; repairing the file system needs Windows' `chkdsk`. Keep a Windows
-  machine (or a Windows To Go stick) to hand for that.
-* **An unclean unmount (power cut, USB drop) marks the volume dirty**, and both
-  drivers then refuse to mount it read-write until `ntfsfix -d` is run (ntfs3
-  has a `force` option; don't put it in fstab). On an unattended machine that
-  means the drive comes back read-only or not at all after a power cut, until
-  someone logs in. Watch for this after every outage.
-* **Windows Fast Startup** (it is on: `HiberbootEnabled = 1`) leaves volumes in
-  a hibernated state that Linux won't write to. The last Windows shutdown before
-  the switch must be a full one (see the checklist).
-* Ownership and permissions are fixed at mount time (`uid`, `gid`, `umask`);
-  that suits a single-user data drive.
+  flag; a real repair needs Windows' `chkdsk`.
+* **An unclean unmount** (power cut, USB drop) **marks the volume dirty**, and
+  it then won't mount read-write until `sudo ntfsfix -d /dev/sdX1`. On an
+  unattended machine, that means a power cut can leave the drive missing until
+  someone logs in. The omea service then won't start (it needs the mount, see
+  below), and Nagios will say so.
+* Ownership and permissions are fixed at mount time (`uid`, `gid`, `umask`).
 
 **Recommendation: keep NTFS for the move, and plan ext4 as a second step.**
-Reformatting now means first copying 10 TB somewhere, which turns a one-day
-migration into a week, and the archive should not be moved without a second
-copy anyway. So:
+Reformatting first means copying 10 TB elsewhere. Later: buy a second drive
+of 18 TB or more, `mkfs.ext4 -L skycam-data -T largefile4`, `rsync -aH` the
+archive onto it and run on that, keeping the NTFS drive as an offline backup
+readable anywhere. The archive has no other copy today, so that second drive
+is worth buying anyway.
 
-1. Migrate with the drive as it is, mounted with ntfs3 (ntfs-3g as the fallback
-   if ntfs3 misbehaves; switching is an fstab edit).
-2. Buy a second drive of 18 TB or more, format it ext4, `rsync -aH` the archive
-   onto it, and run on that. The NTFS drive becomes the offline backup, readable
-   by any Windows or Mac machine. Does the archive have a copy anywhere else
-   today? If not, this second drive is worth buying regardless.
-
-ext4 on 18 TB needs nothing special (`mkfs.ext4 -L skycam-data -T largefile4
-/dev/sdX1` gives a sensible inode count for 1-10 MB files; drop `-T largefile4`
-if many small files, e.g. the `*_phot.csv`, are expected; check `df -i` on a
-test).
-
-### Mount it at `/mnt/d`
-
-Mounting at the same path means nothing else changes: `config.toml`, the movie
-scripts (they hard-code `/mnt/d/skycam`), the web symlinks and skycam_utils'
-scripts all keep working.
+Mount it at `/mnt/d`, as now, and nothing else changes: `config.toml`, the
+movie scripts (they hard-code `/mnt/d/skycam`), the web symlinks and
+skycam_utils' scripts all keep working.
 
 ```bash
-sudo blkid                              # find the partition, e.g. UUID="0A1B2C3D4E5F6789" TYPE="ntfs"
+sudo blkid                     # the partition, e.g. /dev/sda1: LABEL="Skycam Data" UUID="..." TYPE="ntfs"
 sudo mkdir -p /mnt/d
-sudo chattr +i /mnt/d                   # nothing can write to the bare mount point
+sudo chattr +i /mnt/d          # nothing can write to the bare mount point
 ```
 
 `/etc/fstab`:
@@ -88,62 +120,20 @@ sudo chattr +i /mnt/d                   # nothing can write to the bare mount po
 UUID=<from blkid>  /mnt/d  ntfs3  uid=1000,gid=1000,umask=022,noatime,nofail,x-systemd.device-timeout=60s  0  0
 ```
 
-(For ntfs-3g: type `ntfs-3g` and the same options, plus `big_writes`.) After a
-dirty shutdown: `sudo ntfsfix -d /dev/sdX1 && sudo mount /mnt/d`.
+(For ntfs-3g: type `ntfs-3g`, same options plus `big_writes`.) `chattr +i`
+matters: if the drive isn't mounted, omea would otherwise create
+`/mnt/d/skycam/<day>` on the NVMe and fill it silently.
 
-`chattr +i` matters: if the drive is not mounted, omea would otherwise create
-`/mnt/d/skycam/<day>` on the NVMe and fill it without complaint. With the bare
-mount point immutable, writes fail and the service logs it.
+## 2. Install Debian
 
-## Before the switch (on the running system)
-
-1. **Code and config.** `omea_linux` and `skycam-utils` are pushed, but these
-   are not in git: `~/omea_linux/config.toml`, the crontab (`crontab -l`),
-   `~/.ssh`, `~/public_html`, `/etc/lighttpd` (incl. `server.pem`),
-   `/var/www/html/skycam` (only `aurora_20241011.mp4`, `RH.jpg`, `temp.jpg`
-   and the symlinks are not regenerated), and skycam-utils' untracked
-   `scripts/position.txt` and `skycam_utils/version.py`. Copy them to the data
-   drive:
-
-   ```bash
-   B=/mnt/d/migration-backup && mkdir -p $B
-   cp ~/omea_linux/config.toml $B/
-   crontab -l > $B/crontab.txt
-   tar czf $B/home-extras.tgz -C ~ .ssh public_html .config/systemd .gitconfig
-   sudo tar czf $B/etc.tgz /etc/lighttpd /etc/udev/rules.d/99-asi.rules /etc/modprobe.d/usbfs.conf
-   tar czf $B/www.tgz -C /var/www/html skycam     # keeps the two symlinks as links
-   cp ~/skycam-utils/scripts/position.txt ~/skycam-utils/skycam_utils/version.py $B/
-   ```
-
-2. **The whole WSL distro**, as a fallback (13 GB), from PowerShell:
-   `wsl --export Ubuntu D:\migration-backup\wsl-ubuntu.tar`.
-3. **Windows files.** Copy `C:\Users\skycam\Documents\skywatch` (78 GB) to
-   `D:\migration-backup\skywatch\`, and anything else wanted from `C:\Users`.
-   Note the SkyWatch registry key (`HKCU\Software\SkyWatch`) holds the board
-   settings Skywatch used; export it there too if a return to Skywatch should
-   stay possible (it contains a localhost FTP password; keep the file local).
-4. **A disk image of `C:`** if a way back to Windows/Skywatch is wanted: boot
-   Clonezilla and save the NVMe to the data drive (~330 GB used, less
-   compressed). Without it, wiping the NVMe is one-way.
-5. **Note the board's heater thresholds** (`omea board`); they live in the
-   camera and survive anyway, but it's a useful check afterwards.
-6. **Shut Windows down fully**, so the NTFS volume is clean:
-   `shutdown /s /t 0` from an admin prompt (or turn Fast Startup off first:
-   `powercfg /h off`). Not the Start-menu shutdown.
-
-Expect a dark gap of a few hours. Do it in daytime; the dome heater runs from
-its stored thresholds with no software, and the cooler is off in daylight.
-
-## Install
-
-1. **BIOS** (F2 at boot): set *After Power Failure* (in the power settings) to *Power On*, so
-   the NUC comes back by itself after an outage. Leave Secure Boot on; Debian
-   boots with it.
-2. **Debian 13 (trixie)**, netinst from USB: unplug the data drive during the
-   install so the installer can't touch it. Use the whole NVMe, ext4, no
-   desktop (SSH server + standard utilities). Hostname `new-skycam`, user
-   `skycam` (uid 1000, which the fstab line and file ownership assume). The
-   AX201 Wi-Fi needs `firmware-iwlwifi`; Ethernet needs nothing.
+1. **BIOS** (F2 at boot): set *After Power Failure* to *Power On*, so the NUC
+   comes back by itself after an outage. Leave Secure Boot on.
+2. **Debian 13 netinst** from USB. **Unplug the data drive** during the install
+   so the installer can't touch it. Whole NVMe, ext4, no desktop: select only
+   "SSH server" and "standard system utilities". Hostname `new-skycam`, user
+   `skycam`; the first user gets uid 1000, which the fstab line assumes. Set
+   no root password, so `skycam` gets sudo. Ethernet needs no firmware; the
+   AX201 Wi-Fi (unused) would need `firmware-iwlwifi`.
 3. **Network**, `/etc/network/interfaces` (the interface name, e.g. `enp86s0`,
    from `ip link`):
 
@@ -155,124 +145,229 @@ its stored thresholds with no software, and the cooler is off in daylight.
        dns-nameservers 128.196.100.19 8.8.8.8
    ```
 
+   For `dns-nameservers` to take effect, install `resolvconf`, or write
+   `/etc/resolv.conf` by hand.
 4. **Packages**:
 
    ```bash
-   sudo apt install chrony lighttpd lighttpd-mod-openssl openssh-server ffmpeg \
-       ntfs-3g usbutils git build-essential redis-tools bzip2 cron
-   sudo usermod -aG dialout skycam
+   sudo apt install chrony lighttpd openssh-server ffmpeg ntfs-3g usbutils git gh \
+       build-essential redis-tools bzip2 cron curl tmux emacs-nox resolvconf
+   sudo usermod -aG dialout,systemd-journal skycam      # serial port; read logs without sudo
    ```
 
-5. **Clock**: in `/etc/chrony/chrony.conf` replace the pool line with
-   `server mmt-ntp.mmto.arizona.edu iburst prefer` (keep a `pool` line as a
-   backup), then `chronyc tracking` should show an offset of milliseconds. Set
-   `sudo timedatectl set-timezone America/Phoenix`.
-6. **The data drive**: plug it in and mount it as in
-   [Mount it at /mnt/d](#mount-it-at-mntd). `ls /mnt/d/skycam` should list the
-   day directories.
-7. **USB for the camera**: the udev rule from the SDK, which also raises the
-   usbfs buffer the 23 MB frames need. The modprobe.d option used under WSL
-   only works if usbcore is a module; a kernel argument works either way:
+   (`dialout` takes effect at the next log-in. The service sets its own group
+   list, so it doesn't need that.)
+5. **Clock and time zone.** In `/etc/chrony/chrony.conf` add
+   `server mmt-ntp.mmto.arizona.edu iburst prefer` above the `pool` line. Then:
 
    ```bash
-   sudo cp ~/omea_linux/lib/99-asi.rules /etc/udev/rules.d/
-   sudo udevadm control --reload
-   # and add usbcore.usbfs_memory_mb=256 to GRUB_CMDLINE_LINUX_DEFAULT
-   # in /etc/default/grub, then: sudo update-grub
+   sudo systemctl restart chrony
+   sudo systemctl enable chrony-wait.service    # time-sync.target waits for a real sync
+   sudo timedatectl set-timezone America/Phoenix
+   chronyc tracking                             # offset: milliseconds
    ```
 
-   After plugging the camera in (or a reboot):
-   `cat /sys/module/usbcore/parameters/usbfs_memory_mb` should be 200 or more,
-   and `lsusb` should list `03c3:294f` and `0403:6015`.
-8. **Python**: install Miniforge to `~/conda`, then
+6. **SSH**: restore `~/.ssh` from `home-extras.tgz` (mode 700, files 600).
+7. **The data drive**: plug it in and mount it as in [The data
+   drive](#the-data-drive). Then `ls /mnt/d/skycam` lists the day directories,
+   and `/mnt/d/migration-backup` holds the backup.
 
-   ```bash
-   conda create -n skycam python=3.14
-   conda activate skycam
-   git clone git@github.com:tepickering/skycam-utils.git ~/skycam-utils
-   git clone git@github.com:MMTObservatory/omea_linux.git ~/omea_linux
-   pip install -e ~/skycam-utils
-   pip install -e ~/omea_linux"[test,redis]"
-   cd ~/omea_linux && pytest
-   ```
+## 3. USB for the camera
 
-   Restore `config.toml`, skycam-utils' `scripts/position.txt` and
-   `skycam_utils/version.py`, `~/.ssh` (mode 700/600), `~/public_html` and the
-   crontab (`crontab /mnt/d/migration-backup/crontab.txt`).
-9. **Config changes** in `config.toml`: the weather log moves off `C:`.
-   Copy the history over first:
+The SDK's udev rule makes the camera readable by everyone, and it raises the
+usbfs buffer. That buffer must be larger than one 23 MB RAW16 frame; the
+kernel default is 16 MB, and with it **every exposure fails**. Set it as a
+kernel argument too, so it is right from boot:
 
-   ```bash
-   cp /mnt/d/migration-backup/skywatch/Heater/DataOut_Weather.csv /mnt/d/skycam/
-   ```
+```bash
+# the rule is lib/99-asi.rules in omea_linux; the backup has the installed copy
+sudo tar xzf /mnt/d/migration-backup/etc.tgz -C / etc/udev/rules.d/99-asi.rules
+sudo udevadm control --reload
+sudoedit /etc/default/grub          # add usbcore.usbfs_memory_mb=256 to GRUB_CMDLINE_LINUX_DEFAULT
+sudo update-grub
+```
 
-   ```toml
-   [output]
-   weather_csv = "/mnt/d/skycam/DataOut_Weather.csv"
-   ```
+After a reboot: `cat /sys/module/usbcore/parameters/usbfs_memory_mb` is 256,
+and `lsusb` lists `03c3:294f` (ZWO) and `0403:6015` (FTDI). Plug the camera
+into a USB 3 (blue) port. `ls -l /dev/ttyUSB0` should show group `dialout`.
 
-   Nothing else in it refers to Windows.
-10. **Web**: restore `/etc/lighttpd` (including `server.pem` and the enabled
-    `conf-enabled` links: dir-listing, ssl, userdir) and
-    `/var/www/html/skycam` with its two symlinks into `/mnt/d/skycam`;
-    `sudo systemctl restart lighttpd`.
-11. **The omea service.** Under WSL it is a user service because that is what
-    starts with WSL. Natively a system service is better: it starts at boot
-    without a log-in or linger, and it can wait for the data drive.
-    `/etc/systemd/system/omea.service`:
+There is no usbipd, no Windows watchdog and no `omea-usbip.ps1` on Debian.
 
-    ```ini
-    [Unit]
-    Description=OMEA all-sky camera (replaces Alcor Skywatch)
-    After=network-online.target time-sync.target
-    Wants=network-online.target
-    RequiresMountsFor=/mnt/d
+## 4. Python, omea and skycam_utils
 
-    [Service]
-    Type=simple
-    User=skycam
-    Group=skycam
-    WorkingDirectory=/home/skycam/omea_linux
-    EnvironmentFile=-/home/skycam/.config/omea/env
-    ExecStart=/home/skycam/conda/envs/skycam/bin/omea -c /home/skycam/omea_linux/config.toml run
-    Restart=on-failure
-    RestartSec=30
-    TimeoutStopSec=60
+```bash
+# Miniforge into ~/conda
+curl -LO https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+bash Miniforge3-Linux-x86_64.sh -b -p ~/conda
+~/conda/bin/conda init bash && exec bash
 
-    [Install]
-    WantedBy=multi-user.target
-    ```
+conda create -n skycam python=3.14
+conda activate skycam
+git clone https://github.com/tepickering/skycam-utils.git ~/skycam-utils
+git clone https://github.com/MMTObservatory/omea_linux.git ~/omea_linux
+pip install -e ~/skycam-utils
+pip install -e "$HOME/omea_linux[test,redis]"
+cd ~/omea_linux && pytest            # 51+ tests, all pass
+```
 
-    `sudo systemctl enable --now omea`; logs with `journalctl -u omea -f`. Add
-    `skycam` to the `systemd-journal` group to read them without sudo. (The
-    user service from `systemd/omea.service` with `loginctl enable-linger`
-    still works if preferred, but it can't depend on the mount.)
-    `systemctl enable chrony-wait.service` makes `time-sync.target` wait for a
-    real sync, so frames never carry an unsynced time.
+`skycam-env.yml` in the backup records the versions that ran under WSL. If a
+newer release breaks something, pin back to those.
 
-## Checks after the switch
+Restore:
 
-1. The [first-light checklist](hardware.md#first-light-checklist), steps 1-4.
-2. `omea run` in the service: the log shows frames, the board readings and,
-   at night, photometry; http://new-skycam:8081/ and
-   http://new-skycam/skycam/latest_image.jpg are live; the redis keys update
-   (`redis-cli -h redis.mmto.arizona.edu get allsky_external_temp`).
-3. `chronyc tracking`: offset under a few ms. Under WSL it was ~1 s.
-4. The next morning: the 13:15 `daily_movies.sh` ran (movies and keograms
-   for the night), `latest_movie.mp4` updates every minute.
-5. **Reboot test**: `sudo reboot`, and check everything comes back on its own,
-   then a **power-cut test** (pull the plug): the NUC powers on, and see
-   whether the data drive mounted read-write (`mount | grep /mnt/d`). If it is
-   dirty, that is the NTFS cost described above; `ntfsfix -d` and remount.
-6. Readout should be faster than under USB/IP; compare frame cadence in
-   `omea_live.csv` with a WSL night.
+```bash
+B=/mnt/d/migration-backup
+cp $B/config.toml ~/omea_linux/
+cp $B/position.txt ~/skycam-utils/scripts/
+cp $B/version.py ~/skycam-utils/skycam_utils/
+tar xzf $B/home-extras.tgz -C ~ public_html .gitconfig .condarc .tmux.conf .emacs.d .ZWO
+crontab $B/crontab.txt
+```
+
+Then **fix `.gitconfig`**: its `credential.helper` points at the Windows Git
+Credential Manager. Remove that line and run `gh auth login` (HTTPS), or switch
+the remotes to SSH.
+
+**The weather log.** Move it to the data drive and point omea at it, because
+the default path is on `C:`:
+
+```bash
+cp $B/DataOut_Weather.csv /mnt/d/skycam/
+```
+
+In `~/omea_linux/config.toml` add:
+
+```toml
+[output]
+weather_csv = "/mnt/d/skycam/DataOut_Weather.csv"
+```
+
+Nothing else in `config.toml` refers to Windows. As of this writing it sets
+only `[redis] enabled = true` and `[board] heater_rh = 60.0`. Everything else
+is the defaults in `omea/config.py`, which reproduce Skywatch's setup.
+
+**First light** (service not running yet):
+
+```bash
+omea -c ~/omea_linux/config.toml camera-info     # lists the camera
+omea -c ~/omea_linux/config.toml board           # firmware 2.20, "OMEA 8", sensible temps/RH
+omea iris 16 && omea iris 2.8                    # you hear the iris
+omea focus 1320                                  # homes, then 1320 steps
+omea snap --exposure 0.005 -o /tmp/test.fits.bz2 # a frame; no timeouts
+```
+
+[hardware.md](hardware.md#first-light-checklist) has the full checklist,
+including the geometry check against a Skywatch frame.
+
+## 5. The omea service
+
+Under WSL omea is a user service, because that is what starts with WSL. On
+Debian, make it a system service: it starts at boot without a log-in, and it
+can wait for the data drive and the clock. Create `/etc/systemd/system/omea.service`:
+
+```ini
+[Unit]
+Description=OMEA all-sky camera (replaces Alcor Skywatch)
+After=network-online.target time-sync.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/d
+
+[Service]
+Type=simple
+User=skycam
+Group=skycam
+SupplementaryGroups=dialout
+WorkingDirectory=/home/skycam/omea_linux
+# REDISPW=... here if redis ever needs a password
+EnvironmentFile=-/home/skycam/.config/omea/env
+ExecStart=/home/skycam/conda/envs/skycam/bin/omea -c /home/skycam/omea_linux/config.toml run
+Restart=on-failure
+RestartSec=30
+# the cooler is switched off on a clean stop; give a 20 s exposure time to end
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now omea
+journalctl -u omea -f
+```
+
+Commands from the README change from `systemctl --user ... omea` to
+`sudo systemctl ... omea`. Stop the service before the hardware utilities
+(`omea iris`, `omea heater`, ...); it holds the serial port.
+
+## 6. Web
+
+```bash
+sudo tar xzf /mnt/d/migration-backup/etc.tgz -C / etc/lighttpd
+sudo tar xzf /mnt/d/migration-backup/www.tgz -C /var/www/html
+sudo chown -R skycam:skycam /var/www/html/skycam
+sudo systemctl restart lighttpd
+```
+
+`etc.tgz` restores `lighttpd.conf`, `server.pem` and the `conf-enabled` links
+(10-dir-listing, 10-ssl, 10-userdir, 99-unconfigured). If Debian's lighttpd
+complains about `mod_openssl`, `sudo apt install lighttpd-mod-openssl`. omea
+rewrites `ImageLastFTP_AllSKY*.jpg` there on every frame, and `latest_movie.sh`
+rewrites `latest_movie.mp4` every minute. `aurora_20241011.mp4`, `RH.jpg` and
+`temp.jpg` are static and come only from the backup.
+
+## 7. Checks after the switch
+
+1. `journalctl -u omea` shows frames, board readings and, after dark,
+   photometry. http://new-skycam:8081/ and
+   http://new-skycam/skycam/latest_image.jpg are live. Redis updates:
+   `redis-cli -h redis.mmto.arizona.edu get allsky_external_temp`.
+2. `curl -s localhost:8081/api/status`: `"dropped": 0`, and `frames` going up.
+3. `chronyc tracking`: offset of a few ms.
+4. At dusk: the log shows `cooling on, ramping ...`, then the iris to f/2.8
+   and night exposures.
+5. The next afternoon: the 13:15 `daily_movies.sh` ran (`/mnt/d/skycam/movies/<day>/`,
+   `keograms/<year>/png/`), and `latest_movie.mp4` updates every minute.
+6. **Reboot test**: `sudo reboot`; everything comes back by itself.
+7. **Power-cut test** (pull the plug): the NUC powers on; check
+   `mount | grep /mnt/d` is read-write. If the volume came back dirty, that is
+   the NTFS cost: `sudo ntfsfix -d /dev/sdX1 && sudo mount /mnt/d && sudo systemctl start omea`.
+8. Readout should be faster than under USB/IP. Under USB/IP the kernel logged
+   a `reset SuperSpeed USB device` once per exposure, which was harmless.
+   Natively, compare `dmesg | grep -c reset` against the number of frames; an
+   occasional reset is fine, but a rising count with `exposure failed` is not.
+9. Tell whoever runs Nagios if the host's name or address changed.
+
+## Known gaps and history worth knowing
+
+* **The sensor board isn't reopened on its own.** omea opens the serial board
+  only when it (re)opens the camera. If the FTDI adapter alone drops (a replug
+  or USB hiccup), the board stays lost, with `sensor board read failed`
+  warnings, until the service restarts: `sudo systemctl restart omea`.
+* **Under WSL, Windows Update was the main hazard.** On 2026-11-06 the camera
+  returned `EXP_FAILED` on every exposure until the machine restarted. On
+  2026-11-09 an automatic WSL update shut WSL down for four hours. Native
+  Debian removes both layers. Debian doesn't update itself unless
+  `unattended-upgrades` is installed; if it is, keep it to security updates
+  (its default) and don't let it reboot (`Automatic-Reboot "false"`, the
+  default). A new kernel only takes effect at a reboot, so reboot by hand, in
+  daytime.
+* The dome-heater logic (`omea/heater.py`) and its tuning are independent of
+  the host. Its history is in the git log.
 
 ## Clean-up in the code (after the move)
 
-* `docs/hardware.md` and the README describe WSL as the host; rewrite for
+* `docs/hardware.md` and the README describe WSL as the host: rewrite for
   native, and move `windows/` to a historical note.
-* `omea/config.py`'s default `weather_csv` points at `C:`; change it to
-  `/mnt/d/skycam/DataOut_Weather.csv` (as `config.example.toml` already has).
+* `omea/config.py`'s default `weather_csv` points at `C:`: change it to
+  `/mnt/d/skycam/DataOut_Weather.csv`, as `config.example.toml` has.
 * `systemd/omea.service`: ship the system-service version above.
 * The drvfs workarounds (reading the extinction FITS without memmap in
   `omea/science.py`) are harmless natively; leave them.
+
+## Going back
+
+If the Clonezilla image of `C:` was taken, restoring it brings back Windows,
+WSL and this setup exactly. With only `wsl-ubuntu.tar`: install Windows 11,
+WSL and usbipd-win, `wsl --import Ubuntu C:\WSL\Ubuntu D:\migration-backup\wsl-ubuntu.tar`,
+then follow [hardware.md](hardware.md#under-wsl2-the-current-windows-host).
