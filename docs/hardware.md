@@ -25,13 +25,21 @@ usbipd bind --hardware-id 0403:6015          # FTDI serial adapter
 ```
 
 Binding persists; after it, attaching needs no elevation. Attaching is kept up
-by [windows/omea-usbip.ps1](../windows/omea-usbip.ps1), which waits for WSL and
-then runs `usbipd attach --wsl --hardware-id <id> --auto-attach` for each device
-in a hidden window (`--auto-attach` re-attaches after a replug or WSL restart,
-but only while that process runs). On this host:
+by [windows/omea-usbip.ps1](../windows/omea-usbip.ps1), a watchdog that runs
+from log-in in a hidden window. Every 30 s it starts WSL if it is not running
+(with systemd and linger that also starts omea) and checks with `lsusb` that
+both devices are visible in WSL; a device missing on two checks in a row is
+detached (clearing a stale "Attached" left by a WSL restart) and attached
+again. It replaces `usbipd attach --auto-attach`, whose processes exit when WSL
+shuts down: on 2026-11-09 Windows Update installed a new WSL, which stopped WSL
+for four hours and left both devices unattached after it was restarted.
+usbipd-win 5.3 itself re-attaches a bound device after a plain detach or
+replug within about a second; the watchdog covers what that misses. On this
+host:
 
 * `C:\Users\skycam\omea\omea-usbip.ps1` is the script; it logs to
-  `%LOCALAPPDATA%\omea-usbip.log`.
+  `%LOCALAPPDATA%\omea-usbip.log` (start-up, and each repair). Only one copy
+  runs (a named mutex), so running it again by hand is harmless.
 * `windows/omea-usbip.cmd` is in the Startup folder
   (`shell:startup`) next to the "Ubuntu" shortcut that starts WSL at log-in.
 * The "Skywatch" startup shortcut was moved to
